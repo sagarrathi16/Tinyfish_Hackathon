@@ -131,6 +131,7 @@ export const StepBindingSchema = z.object({
       placeholder: z.string().optional(),
       testid: z.string().optional(),
       text: z.string().optional(),
+      nearbyStructure: z.string().optional(),
     })
     .default({}),
   uniquenessExpectation: z.enum(["SINGLE", "MULTIPLE"]).default("SINGLE"),
@@ -313,4 +314,19 @@ export const BenchmarkRecordSchema = z.object({
   executedAt: z.string().datetime(),
 });
 export type BenchmarkRecord = z.infer<typeof BenchmarkRecordSchema>;
+
+// ============================================================================
+// 6. TraceRecord
+// ============================================================================
+
+export const TraceRecordSchema = z.object({
+  traceId: z.string().uuid(),
+  jobId: z.string().uuid(),
+  runId: z.string().uuid(),
+  traceType: z.string().min(1),
+  data: z.record(z.unknown()),
+  createdAt: z.string().datetime(),
+});
+export type TraceRecord = z.infer<typeof TraceRecordSchema>;
+
 

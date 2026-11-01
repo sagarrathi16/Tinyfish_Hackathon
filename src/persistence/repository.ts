@@ -6,6 +6,7 @@ import {
   RunEventSchema,
   SiteAdapterSchema,
   SkillSchema,
+  TraceRecordSchema,
   ValidationResultSchema,
   type AgentResult,
   type AgentTask,
@@ -13,6 +14,7 @@ import {
   type RunEvent,
   type SiteAdapter,
   type Skill,
+  type TraceRecord,
   type ValidationResult,
 } from "../types/domain.js";
 import { getDatabase } from "./database.js";
@@ -118,6 +120,14 @@ export class Repository {
     });
 
     return promoteTx();
+  }
+
+  /**
+   * Rolls back the active adapter for a domain to a previous approved version.
+   * Atomically sets the target version to ACTIVE and retires the superseded active version.
+   */
+  rollbackSiteAdapter(domain: string, targetVersion: string): SiteAdapter {
+    return this.promoteSiteAdapter(domain, targetVersion);
   }
 
   // ==========================================================================
@@ -373,6 +383,58 @@ export class Repository {
 
     const rows = (site ? stmt.all(site) : stmt.all()) as Array<{ data_json: string }>;
     return rows.map((r) => BenchmarkRecordSchema.parse(JSON.parse(r.data_json)));
+  }
+
+  // ==========================================================================
+  // Execution Traces & Auditing
+  // ==========================================================================
+
+  saveTrace(trace: TraceRecord): void {
+    const validated = TraceRecordSchema.parse(trace);
+    const stmt = this.db.prepare(`
+      INSERT INTO traces (trace_id, job_id, run_id, trace_type, data_json, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(trace_id) DO UPDATE SET
+        data_json = excluded.data_json
+    `);
+
+    stmt.run(
+      validated.traceId,
+      validated.jobId,
+      validated.runId,
+      validated.traceType,
+      JSON.stringify(validated.data),
+      validated.createdAt
+    );
+  }
+
+  getTracesByJob(jobId: string): TraceRecord[] {
+    const stmt = this.db.prepare(`
+      SELECT trace_id, job_id, run_id, trace_type, data_json, created_at
+      FROM traces
+      WHERE job_id = ?
+      ORDER BY created_at ASC
+    `);
+
+    const rows = stmt.all(jobId) as Array<{
+      trace_id: string;
+      job_id: string;
+      run_id: string;
+      trace_type: string;
+      data_json: string;
+      created_at: string;
+    }>;
+
+    return rows.map((r) =>
+      TraceRecordSchema.parse({
+        traceId: r.trace_id,
+        jobId: r.job_id,
+        runId: r.run_id,
+        traceType: r.trace_type,
+        data: JSON.parse(r.data_json),
+        createdAt: r.created_at,
+      })
+    );
   }
 
   // ==========================================================================

@@ -23,6 +23,11 @@ export interface TeachParams {
   entryUrl: string;
   sampleQuery: string;
   validationQueries: string[];
+  budget?: {
+    maxAgentRuns?: number;
+    maxCostUsd?: number;
+    timeoutSeconds?: number;
+  };
 }
 
 export interface TeachOutcome {
@@ -42,6 +47,11 @@ export interface ExecuteParams {
   taskProfile?: TaskProfile;
   fallbackValidationQuery?: string;
   replayOptions?: ReplayOptions;
+  budget?: {
+    maxAgentRuns?: number;
+    maxCostUsd?: number;
+    timeoutSeconds?: number;
+  };
 }
 
 export interface ExecuteOutcome {
@@ -93,7 +103,11 @@ export class ShadowTwinOrchestrator {
   async teach(params: TeachParams): Promise<TeachOutcome> {
     const jobId = params.jobId || randomUUID();
     const sm = new OrchestratorStateMachine(jobId, params.domain, this.repo, "READY");
-    const budget = new JobBudgetTracker(jobId);
+    const budget = new JobBudgetTracker(
+      jobId,
+      params.budget?.maxAgentRuns,
+      params.budget?.timeoutSeconds
+    );
     const startTime = Date.now();
 
     logger.info("Orchestrator starting workflow induction (teach)", {
@@ -278,7 +292,11 @@ export class ShadowTwinOrchestrator {
   async execute(params: ExecuteParams): Promise<ExecuteOutcome> {
     const jobId = params.jobId || randomUUID();
     const sm = new OrchestratorStateMachine(jobId, params.domain, this.repo, "READY");
-    const budget = new JobBudgetTracker(jobId);
+    const budget = new JobBudgetTracker(
+      jobId,
+      params.budget?.maxAgentRuns,
+      params.budget?.timeoutSeconds
+    );
     const startTime = Date.now();
 
     // 1. Load active skill and active adapter
@@ -348,12 +366,13 @@ export class ShadowTwinOrchestrator {
     }
 
     // =========================================================================
-    // Scenario B: Bot Blocked
+    // Scenario B: Bot Blocked or Access Denied (DO NOT RECOVER)
     // =========================================================================
-    if (valResult.status === "BLOCKED") {
+    if (valResult.status === "BLOCKED" || valResult.failureCategory === "BLOCKED") {
+      logger.warn("Replay blocked by site access control; recovery prohibited", { jobId, domain: params.domain });
       sm.transition("BLOCKED", {
         agentRole: "VALIDATOR",
-        reason: "Access to storefront blocked or rate limited",
+        reason: "Access to storefront blocked or rate limited (recovery prohibited)",
       });
       return {
         jobId,
@@ -363,17 +382,18 @@ export class ShadowTwinOrchestrator {
         activeVersion: activeAdapter.adapterVersion,
         agentCallsCount: 0,
         durationMs: Date.now() - startTime,
-        reason: "Target storefront access blocked",
+        reason: "Target storefront access blocked or bot detected",
       };
     }
 
     // =========================================================================
-    // Scenario C: Product Identity Mismatch
+    // Scenario C: Unsafe Destination URL or SSRF (DO NOT RECOVER)
     // =========================================================================
-    if (valResult.status === "NEEDS_REVIEW" && valResult.failureCategory === "MISMATCH") {
+    if (valResult.failureCategory === "UNSAFE_URL") {
+      logger.warn("Unsafe destination URL or SSRF violation; recovery prohibited", { jobId, domain: params.domain });
       sm.transition("NEEDS_REVIEW", {
         agentRole: "VALIDATOR",
-        reason: "Extracted product failed semantic identity matching",
+        reason: "Unsafe destination URL or redirect violation (recovery prohibited)",
       });
       return {
         jobId,
@@ -383,12 +403,107 @@ export class ShadowTwinOrchestrator {
         activeVersion: activeAdapter.adapterVersion,
         agentCallsCount: 0,
         durationMs: Date.now() - startTime,
-        reason: "Extracted product does not match user query",
+        reason: "Unsafe destination URL or redirect violation",
       };
     }
 
     // =========================================================================
-    // Scenario D: Binding Failed -> Autonomous Self-Healing Recovery Loop
+    // Scenario D: Product Identity Mismatch or Variant Conflict (DO NOT RECOVER)
+    // =========================================================================
+    if (valResult.failureCategory === "MISMATCH" || valResult.status === "NEEDS_REVIEW") {
+      logger.info("Product identity mismatch or variant conflict; recovery prohibited", { jobId, domain: params.domain });
+      sm.transition("NEEDS_REVIEW", {
+        agentRole: "VALIDATOR",
+        reason: "Extracted product failed semantic identity matching (recovery prohibited)",
+      });
+      return {
+        jobId,
+        status: "NEEDS_REVIEW",
+        finalState: sm.getState(),
+        selfHealed: false,
+        activeVersion: activeAdapter.adapterVersion,
+        agentCallsCount: 0,
+        durationMs: Date.now() - startTime,
+        reason: "Extracted product does not match user query or is an accessory",
+      };
+    }
+
+    // =========================================================================
+    // Scenario E: Prompt Injection Policy Violation (DO NOT RECOVER)
+    // =========================================================================
+    if (valResult.failureCategory === "PROMPT_INJECTION") {
+      logger.warn("Prompt injection detected; recovery prohibited", { jobId, domain: params.domain });
+      sm.transition("NEEDS_REVIEW", {
+        agentRole: "VALIDATOR",
+        reason: "Adversarial prompt injection detected in page text (recovery prohibited)",
+      });
+      return {
+        jobId,
+        status: "NEEDS_REVIEW",
+        finalState: sm.getState(),
+        selfHealed: false,
+        activeVersion: activeAdapter.adapterVersion,
+        agentCallsCount: 0,
+        durationMs: Date.now() - startTime,
+        reason: "Adversarial prompt injection detected in page content",
+      };
+    }
+
+    // =========================================================================
+    // Scenario F: Non-Recoverable Failure Filter
+    // =========================================================================
+    if (valResult.failureCategory !== "BINDING_FAILED" && replayResult.status !== "STUCK") {
+      logger.warn("Non-recoverable failure category; recovery aborted", {
+        jobId,
+        failureCategory: valResult.failureCategory,
+      });
+      sm.transition("NEEDS_REVIEW", {
+        agentRole: "VALIDATOR",
+        reason: `Non-recoverable failure category: ${valResult.failureCategory}`,
+      });
+      return {
+        jobId,
+        status: "NEEDS_REVIEW",
+        finalState: sm.getState(),
+        selfHealed: false,
+        activeVersion: activeAdapter.adapterVersion,
+        agentCallsCount: 0,
+        durationMs: Date.now() - startTime,
+        reason: `Non-recoverable failure: ${valResult.failureCategory}`,
+      };
+    }
+
+    // =========================================================================
+    // Scenario G: Check Budget Before Invoking Recovery Agent
+    // =========================================================================
+    if (!budget.canMakeAgentCall()) {
+      logger.warn("Recovery aborted: Agent call budget exhausted", {
+        jobId,
+        callsMade: budget.agentCallsCount,
+        maxCalls: budget.maxAgentRuns,
+      });
+      sm.transition("STUCK", {
+        agentRole: "EXECUTOR",
+        reason: "Replay stuck and agent budget exhausted",
+      });
+      sm.transition("NEEDS_REVIEW", {
+        agentRole: "ORCHESTRATOR",
+        reason: "Recovery budget exhausted: maximum agent runs exceeded",
+      });
+      return {
+        jobId,
+        status: "NEEDS_REVIEW",
+        finalState: sm.getState(),
+        selfHealed: false,
+        activeVersion: activeAdapter.adapterVersion,
+        agentCallsCount: budget.agentCallsCount,
+        durationMs: Date.now() - startTime,
+        reason: "Recovery budget exhausted: maximum agent runs exceeded",
+      };
+    }
+
+    // =========================================================================
+    // Scenario H: Binding Failed -> Autonomous Self-Healing Recovery Loop
     // =========================================================================
     logger.warn("Deterministic replay failed postcondition; initiating recovery loop", {
       jobId,
@@ -410,20 +525,49 @@ export class ShadowTwinOrchestrator {
     // Record recovery agent call against budget
     budget.recordAgentCall(0.015);
 
-    // Identify failing binding key
+    // Identify failing binding key and reconstructible URL
     const failingBindingKey = this.identifyFailingBinding(replayResult);
+    const reconstructibleUrl = activeAdapter.urlPatterns.searchUrlTemplate
+      ? activeAdapter.urlPatterns.searchUrlTemplate.replace("{query}", encodeURIComponent(params.query))
+      : activeAdapter.urlPatterns.entryUrl;
 
-    const recoveryOutcome = await this.recovery.recoverBinding({
-      task,
-      activeAdapter,
-      failingBindingKey,
-      failureDetails: {
-        code: replayResult.errors[0]?.code || "BINDING_FAILED",
-        message: replayResult.errors[0]?.message || "Selector broken",
-        currentUrl: activeAdapter.urlPatterns.entryUrl,
-      },
-      query: params.query,
-    });
+    let recoveryOutcome;
+    try {
+      recoveryOutcome = await this.recovery.recoverBinding({
+        task,
+        activeAdapter,
+        failingBindingKey,
+        failedStepId: failingBindingKey,
+        oldBinding: activeAdapter.locatorBindings[failingBindingKey],
+        failureDetails: {
+          code: replayResult.errors[0]?.code || "BINDING_FAILED",
+          message: replayResult.errors[0]?.message || "Selector broken",
+          currentUrl: reconstructibleUrl,
+        },
+        query: params.query,
+        reconstructibleUrl,
+        priorInputs: { query: params.query },
+        expectedPostcondition: `Step ${failingBindingKey} must locate valid control/container in DOM`,
+        domSnippet: replayResult.errors[0]?.message,
+      });
+    } catch (err: unknown) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      logger.error("Recovery Agent failed during diagnosis", { jobId, error: errorMsg });
+      sm.transition("NEEDS_REVIEW", {
+        agentRole: "RECOVERY",
+        reason: `Recovery Agent failed: ${errorMsg}`,
+      });
+      return {
+        jobId,
+        status: "NEEDS_REVIEW",
+        finalState: sm.getState(),
+        selfHealed: false,
+        activeVersion: activeAdapter.adapterVersion,
+        agentCallsCount: budget.agentCallsCount,
+        durationMs: Date.now() - startTime,
+        reason: `Recovery Agent failed: ${errorMsg}`,
+      };
+    }
 
     const candidateAdapter = recoveryOutcome.candidateAdapter;
 
@@ -483,7 +627,7 @@ export class ShadowTwinOrchestrator {
         status: "NEEDS_REVIEW",
         finalState: sm.getState(),
         selfHealed: false,
-        activeVersion: activeAdapter.adapterVersion,
+        activeVersion: activeAdapter.adapterVersion, // Active vN unchanged!
         agentCallsCount: budget.agentCallsCount,
         durationMs: Date.now() - startTime,
         reason: gateDecision.reason,
@@ -496,6 +640,32 @@ export class ShadowTwinOrchestrator {
     sm.transition("ACTIVE", {
       agentRole: "ORCHESTRATOR",
       reason: `Promoted repaired candidate adapter v${candidateAdapter.adapterVersion} to ACTIVE`,
+    });
+
+    // Persist recovery promotion trace
+    this.repo.saveTrace({
+      traceId: randomUUID(),
+      jobId,
+      runId: task.taskId,
+      traceType: "RECOVERY_PROMOTION",
+      data: {
+        domain: params.domain,
+        previousVersion: activeAdapter.adapterVersion,
+        candidateVersion: candidateAdapter.adapterVersion,
+        repairedBindingKey: failingBindingKey,
+        beforeBinding: activeAdapter.locatorBindings[failingBindingKey]?.locatorValue,
+        afterBinding: candidateAdapter.locatorBindings[failingBindingKey]?.locatorValue,
+        diff: recoveryOutcome.diff,
+        recoveryRunId: recoveryOutcome.recoveryRunId,
+        validationQueries: [params.query, secondQuery],
+        validationResults: [
+          { query: params.query, status: valRes1.status },
+          { query: secondQuery, status: valRes2.status },
+        ],
+        latencyMs: Date.now() - startTime,
+        agentCallsCount: budget.agentCallsCount,
+      },
+      createdAt: new Date().toISOString(),
     });
 
     activeAdapter = this.repo.getActiveSiteAdapter(params.domain)!;

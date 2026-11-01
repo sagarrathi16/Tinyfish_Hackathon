@@ -74,6 +74,15 @@ export class JobBudgetTracker {
     this.startTime = Date.now();
   }
 
+  get maxAgentRuns(): number {
+    return this.maxAgentCalls;
+  }
+
+  canMakeAgentCall(): boolean {
+    const elapsed = Date.now() - this.startTime;
+    return this.agentCallsCount < this.maxAgentCalls && elapsed < this.timeoutMs;
+  }
+
   recordAgentCall(estimatedCostUsd: number = 0.01): void {
     this.agentCallsCount++;
     this.totalEstimatedCostUsd += estimatedCostUsd;

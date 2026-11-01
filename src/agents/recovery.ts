@@ -1,5 +1,7 @@
 import { randomUUID } from "node:crypto";
+import { z } from "zod";
 import { RunStatus } from "@tiny-fish/sdk";
+import { getEnv } from "../config/env.js";
 import type { Repository } from "../persistence/repository.js";
 import {
   SiteAdapterSchema,
@@ -15,13 +17,49 @@ export interface RecoveryContext {
   task: AgentTask;
   activeAdapter: SiteAdapter;
   failingBindingKey: "SEARCH_INPUT" | "PRODUCT_CARD" | "PRODUCT_TITLE" | "PRODUCT_PRICE" | "OPEN";
+  failedStepId?: string;
+  oldBinding?: StepBinding;
   failureDetails: {
     code: string;
     message: string;
     currentUrl?: string;
   };
   query: string;
+  reconstructibleUrl?: string;
+  priorInputs?: Record<string, unknown>;
+  expectedPostcondition?: string;
+  domSnippet?: string;
+  timeoutMs?: number;
 }
+
+export const RepairedBindingSchema = z.object({
+  semantic_role: z.string().min(1),
+  locator_strategy: z.enum(["css", "role", "text", "xpath"]).default("css"),
+  repaired_selector: z.string().min(1),
+  anchor_evidence: z
+    .object({
+      role: z.string().optional(),
+      label: z.string().optional(),
+      placeholder: z.string().optional(),
+      testid: z.string().optional(),
+      text: z.string().optional(),
+      nearby_structure: z.string().optional(),
+    })
+    .default({}),
+  explanation: z.string().min(1),
+});
+
+export const RecoveryAgentOutputSchema = z.object({
+  repaired_binding: RepairedBindingSchema,
+  verification_product: z
+    .object({
+      title: z.string().optional(),
+      price: z.string().optional(),
+      product_url: z.string().optional(),
+    })
+    .default({}),
+});
+export type RecoveryAgentOutput = z.infer<typeof RecoveryAgentOutputSchema>;
 
 export const RECOVERY_OUTPUT_SCHEMA = {
   type: "object",
@@ -30,14 +68,24 @@ export const RECOVERY_OUTPUT_SCHEMA = {
       type: "object",
       properties: {
         semantic_role: { type: "string" },
+        locator_strategy: { type: "string", enum: ["css", "role", "text", "xpath"] },
         repaired_selector: { type: "string" },
-        anchor_attribute: { type: "string" },
+        anchor_evidence: {
+          type: "object",
+          properties: {
+            role: { type: "string" },
+            label: { type: "string" },
+            placeholder: { type: "string" },
+            testid: { type: "string" },
+            text: { type: "string" },
+            nearby_structure: { type: "string" },
+          },
+        },
         explanation: { type: "string" },
       },
       required: [
         "semantic_role",
         "repaired_selector",
-        "anchor_attribute",
         "explanation",
       ],
     },
@@ -54,6 +102,20 @@ export const RECOVERY_OUTPUT_SCHEMA = {
   required: ["repaired_binding", "verification_product"],
 };
 
+export interface RecoveryOutcome {
+  candidateAdapter: SiteAdapter;
+  recoveryRunId: string;
+  diagnosis: string;
+  beforeBinding?: StepBinding;
+  afterBinding: StepBinding;
+  repairedBindingKey: string;
+  diff: {
+    previousSelector: string;
+    newSelector: string;
+    explanation: string;
+  };
+}
+
 export class RecoveryAgent {
   private client: TinyFishClient;
   private repo?: Repository;
@@ -69,16 +131,37 @@ export class RecoveryAgent {
    * TinyFish on the reconstructible URL, inspects mutated DOM, and synthesizes a
    * CANDIDATE SiteAdapter vNext for independent 2-query validation.
    *
-   * CRITICAL: Never modifies active skill/adapter directly. Status is always CANDIDATE.
+   * CRITICAL GUARDRAIL: Never modifies active skill/adapter directly. Status is always CANDIDATE.
    */
-  async recoverBinding(context: RecoveryContext): Promise<{
-    candidateAdapter: SiteAdapter;
-    recoveryRunId: string;
-    diagnosis: string;
-  }> {
-    const { task, activeAdapter, failingBindingKey, failureDetails, query } = context;
-    const oldBinding = activeAdapter.locatorBindings[failingBindingKey];
-    const targetUrl = failureDetails.currentUrl || activeAdapter.urlPatterns.entryUrl;
+  async recoverBinding(context: RecoveryContext): Promise<RecoveryOutcome> {
+    const {
+      task,
+      activeAdapter,
+      failingBindingKey,
+      failedStepId = failingBindingKey,
+      failureDetails,
+      query,
+      reconstructibleUrl,
+      priorInputs = { query },
+      expectedPostcondition = `Locate valid control/container for step '${failedStepId}'`,
+      domSnippet = failureDetails.message,
+    } = context;
+
+    const oldBinding = context.oldBinding || activeAdapter.locatorBindings[failingBindingKey];
+
+    // Determine reconstructible URL:
+    // Prefer stateless query-parameterized GET URL; otherwise approved entry URL
+    let targetUrl: string;
+    if (reconstructibleUrl) {
+      targetUrl = reconstructibleUrl;
+    } else if (activeAdapter.urlPatterns.searchUrlTemplate) {
+      targetUrl = activeAdapter.urlPatterns.searchUrlTemplate.replace("{query}", encodeURIComponent(query));
+    } else {
+      targetUrl = failureDetails.currentUrl || activeAdapter.urlPatterns.entryUrl;
+    }
+
+    // Validate domain safety before launching TinyFish Agent
+    this.validateTargetDomainSafety(targetUrl, activeAdapter.domain);
 
     logger.info("Recovery Agent initiating autonomous self-healing diagnosis", {
       taskId: task.taskId,
@@ -99,22 +182,31 @@ export class RecoveryAgent {
         timestamp: new Date().toISOString(),
         payloadSummary: {
           failingBindingKey,
+          failedStepId,
           oldSelector: oldBinding?.locatorValue,
           failureMessage: failureDetails.message,
           targetUrl,
+          priorInputs,
+          expectedPostcondition,
         },
       });
     }
 
     const recoveryGoal = `
-The website at ${targetUrl} had a layout change.
-The step '${failingBindingKey}' failed using selector '${oldBinding?.locatorValue || "unknown"}'.
-Failure details: ${failureDetails.message}
+The website at ${targetUrl} experienced a DOM layout or navigation change.
+Failed step ID: '${failedStepId}'.
+Previous binding: selector='${oldBinding?.locatorValue || "unknown"}', strategy='${oldBinding?.locatorStrategy || "css"}'.
+Failure reason: ${failureDetails.message}
+Expected postcondition: ${expectedPostcondition}
+Prior user inputs up to failed step: ${JSON.stringify(priorInputs)}
+Sanitized DOM / accessibility evidence: ${domSnippet}
 
-Please inspect the current page:
-1. Identify the updated, working locator for '${failingBindingKey}'.
-2. Find resilient anchor attributes (role, aria-label, placeholder, testid, text).
-3. Search for product '${query}' and extract the product title, price, and product_url to prove the repaired locator functions properly.
+CRITICAL TASK INSTRUCTIONS:
+1. Inspect the live page at ${targetUrl}.
+2. Propose a resilient replacement locator binding for step '${failedStepId}'.
+3. Ground the replacement binding with stable anchor attributes (role, aria-label, placeholder, testid, exact text, or nearby structure).
+4. Provide a clear technical explanation of why the previous selector failed and why the replacement is resilient.
+5. Do NOT merely return the final shopping answer or a static product data object; your primary objective is to repair the reusable locator binding.
 `.trim();
 
     // Call TinyFish Agent to inspect live mutated page
@@ -130,38 +222,46 @@ Please inspect the current page:
       throw new Error(errorMsg);
     }
 
-    const rawOutput = providerResult.result as {
-      repaired_binding: {
-        semantic_role: string;
-        repaired_selector: string;
-        anchor_attribute: string;
-        explanation: string;
-      };
-      verification_product: {
-        title: string;
-        price: string;
-        product_url: string;
-      };
-    };
+    // Validate provider response against schema
+    let parsedOutput: RecoveryAgentOutput;
+    try {
+      parsedOutput = RecoveryAgentOutputSchema.parse(providerResult.result);
+    } catch (schemaErr) {
+      const msg = `Recovery Agent output failed schema validation: ${schemaErr instanceof Error ? schemaErr.message : String(schemaErr)}`;
+      logger.error(msg, { taskId: task.taskId });
+      throw new Error(msg);
+    }
 
-    const repairedBinding = rawOutput.repaired_binding;
-    if (!repairedBinding?.repaired_selector || !repairedBinding.repaired_selector.trim()) {
+    const repairedBinding = parsedOutput.repaired_binding;
+    const repairedSelector = repairedBinding.repaired_selector.trim();
+
+    if (!repairedSelector) {
       throw new Error("TinyFish Recovery Agent returned empty repaired selector");
+    }
+
+    // Guard against accidental hardcoded live prices or timestamps in selector
+    const volatilePricePattern = /₹|\$|£|€|\b(?:rs\.?|inr|usd|gbp|eur)\b/i;
+    if (volatilePricePattern.test(repairedSelector)) {
+      throw new Error(`Repaired selector '${repairedSelector}' contains volatile currency/price text; rejected`);
     }
 
     // Increment SemVer version cleanly (e.g. 1.0.0 -> 1.1.0)
     const nextVersion = this.incrementSemver(activeAdapter.adapterVersion);
 
-    // Build the updated StepBinding with provenance and fallback
+    // Build the updated StepBinding with provenance and anchor evidence
     const updatedStepBinding: StepBinding = {
-      semanticRole: oldBinding ? oldBinding.semanticRole : "SEARCH_INPUT",
-      locatorStrategy: "css",
-      locatorValue: repairedBinding.repaired_selector.trim(),
+      semanticRole: (oldBinding ? oldBinding.semanticRole : "PRODUCT_CARD") as StepBinding["semanticRole"],
+      locatorStrategy: repairedBinding.locator_strategy,
+      locatorValue: repairedSelector,
       anchorEvidence: {
-        text: repairedBinding.anchor_attribute,
-        placeholder: repairedBinding.anchor_attribute,
+        role: repairedBinding.anchor_evidence.role,
+        label: repairedBinding.anchor_evidence.label,
+        placeholder: repairedBinding.anchor_evidence.placeholder,
+        testid: repairedBinding.anchor_evidence.testid,
+        text: repairedBinding.anchor_evidence.text,
+        nearbyStructure: repairedBinding.anchor_evidence.nearby_structure,
       },
-      uniquenessExpectation: oldBinding ? oldBinding.uniquenessExpectation : "SINGLE",
+      uniquenessExpectation: oldBinding ? oldBinding.uniquenessExpectation : "MULTIPLE",
       provenance: "TINYFISH_RECOVERY",
       sourceRunId: providerResult.runId ?? undefined,
       domain: activeAdapter.domain,
@@ -169,10 +269,11 @@ Please inspect the current page:
     };
 
     // Create Candidate Replacement Adapter
+    // CRITICAL: NEVER mark ACTIVE here. Must remain CANDIDATE until 2-query gate passes.
     const candidateAdapter: SiteAdapter = {
       ...activeAdapter,
       adapterVersion: nextVersion,
-      status: "CANDIDATE", // CRITICAL: NEVER mark ACTIVE here
+      status: "CANDIDATE",
       locatorBindings: {
         ...activeAdapter.locatorBindings,
         [failingBindingKey]: updatedStepBinding,
@@ -180,7 +281,7 @@ Please inspect the current page:
       evidence: {
         ...activeAdapter.evidence,
         traceId: providerResult.runId ?? undefined,
-        sampleProductUrl: rawOutput.verification_product.product_url,
+        sampleProductUrl: parsedOutput.verification_product.product_url,
       },
       source: "agent",
       validationQueries: [],
@@ -205,7 +306,7 @@ Please inspect the current page:
           previousVersion: activeAdapter.adapterVersion,
           candidateVersion: nextVersion,
           repairedBindingKey: failingBindingKey,
-          repairedSelector: repairedBinding.repaired_selector,
+          repairedSelector,
           explanation: repairedBinding.explanation,
         },
       });
@@ -221,8 +322,54 @@ Please inspect the current page:
     return {
       candidateAdapter: validatedCandidate,
       recoveryRunId: providerResult.runId || randomUUID(),
-      diagnosis: repairedBinding.explanation || `Repaired ${failingBindingKey} with selector '${repairedBinding.repaired_selector}'`,
+      diagnosis: repairedBinding.explanation || `Repaired ${failingBindingKey} with selector '${repairedSelector}'`,
+      beforeBinding: oldBinding,
+      afterBinding: updatedStepBinding,
+      repairedBindingKey: failingBindingKey,
+      diff: {
+        previousSelector: oldBinding?.locatorValue || "none",
+        newSelector: repairedSelector,
+        explanation: repairedBinding.explanation,
+      },
     };
+  }
+
+  private validateTargetDomainSafety(targetUrl: string, expectedDomain: string): void {
+    const env = getEnv();
+    const isTestMode = env.NODE_ENV === "test" || process.env.VITEST === "true";
+
+    try {
+      const parsed = new URL(targetUrl);
+      if (parsed.protocol !== "https:" && !(isTestMode && parsed.protocol === "http:")) {
+        throw new Error(`Target URL protocol must be HTTPS (received '${parsed.protocol}')`);
+      }
+
+      const hostname = parsed.hostname.toLowerCase();
+      if (
+        !isTestMode &&
+        (hostname === "localhost" ||
+          hostname.startsWith("127.") ||
+          hostname.startsWith("10.") ||
+          hostname.startsWith("192.168.") ||
+          hostname.startsWith("169.254."))
+      ) {
+        throw new Error(`Private IP / localhost target disallowed for recovery: '${hostname}'`);
+      }
+
+      const allowed = env.ALLOWED_TARGET_DOMAINS.split(",").map((d) => d.trim().toLowerCase());
+      const isAllowed =
+        (isTestMode && (hostname === "localhost" || hostname === "127.0.0.1")) ||
+        hostname === expectedDomain.toLowerCase() ||
+        hostname.endsWith(`.${expectedDomain.toLowerCase()}`) ||
+        allowed.some((d) => hostname === d || hostname.endsWith(`.${d}`));
+
+      if (!isAllowed) {
+        throw new Error(`Recovery target URL '${targetUrl}' points to unauthorized domain '${hostname}'`);
+      }
+    } catch (err: unknown) {
+      if (err instanceof Error) throw err;
+      throw new Error(`Failed to validate recovery target URL '${targetUrl}': ${String(err)}`);
+    }
   }
 
   private incrementSemver(currentVersion: string): string {

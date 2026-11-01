@@ -322,4 +322,75 @@ The adversarial test suite evaluates 11 distinct adversarial fixtures:
 Across all 11 adversarial cases, the target and measured metric is strictly:
 $$\text{silentWrongCount} = 0$$
 
+---
+
+## 6. Recovery Agent & Autonomous Self-Healing Promotion
+
+When a live website changes its layout, DOM structure, or navigation, ShadowTwin initiates an autonomous self-healing recovery loop rather than failing silently.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Orch as Orchestrator
+    participant Exec as Executor (Local Playwright)
+    participant Val as Validator Worker
+    participant Rec as Recovery Agent (TinyFish)
+    participant Repo as SQLite Repository
+
+    Orch->>Exec: Replay with active adapter v1.0.0
+    Exec-->>Orch: Fails (BINDING_FAILED: selector broken)
+    Orch->>Val: Validate failure outcome
+    Val-->>Orch: Status: STUCK (Category: BINDING_FAILED)
+    
+    Note over Orch,Rec: Trigger check: strictly BINDING_FAILED; never BLOCKED/MISMATCH
+    Orch->>Rec: Request healing on reconstructible URL + completed inputs
+    Rec->>Rec: Inspect mutated DOM & synthesize candidate v1.1.0
+    Rec->>Repo: Save candidate adapter v1.1.0 (Status: CANDIDATE)
+    Rec-->>Orch: Candidate adapter v1.1.0 + explanation diff
+
+    Note over Orch,Val: Two-Query Validation Gate
+    Orch->>Exec: Replay Query 1 (Arduino Uno) on v1.1.0
+    Exec-->>Orch: Query 1 Result
+    Orch->>Val: Validate Query 1 (PASS)
+
+    Orch->>Exec: Replay Query 2 (ESP32) on v1.1.0
+    Exec-->>Orch: Query 2 Result
+    Orch->>Val: Validate Query 2 (PASS)
+
+    Orch->>Val: Promotion Gate (Both queries PASS?)
+    Val-->>Orch: Eligible = TRUE
+    
+    Orch->>Repo: promoteSiteAdapter(domain, "1.1.0") [ATOMIC]
+    Repo-->>Orch: v1.0.0 -> RETIRED, v1.1.0 -> ACTIVE
+    Orch->>Repo: saveTrace(RECOVERY_PROMOTION diff)
+
+    Orch->>Exec: Execute Query on newly ACTIVE v1.1.0
+    Exec-->>Orch: Replay completed (0 TinyFish Agent calls!)
+    Orch-->>Orch: Job Status: SUCCESS (selfHealed = true)
+```
+
+### 6.1 Non-Negotiable Recovery Trigger Rules
+Recovery is invoked **strictly** for recoverable DOM and navigation failures (`BINDING_FAILED` or `STUCK`). It is explicitly forbidden for:
+* **BLOCKED / CAPTCHA / 403 / 429:** Must halt closed without wasting agent budgets.
+* **UNSAFE_URL / SSRF:** Security boundary violation; moves to `NEEDS_REVIEW`.
+* **MISMATCH / Variant Conflict / Accessory:** Search query semantic ambiguity; moves to `NEEDS_REVIEW`.
+* **PROMPT_INJECTION:** Policy violation; moves to `NEEDS_REVIEW`.
+* **Budget Exhaustion:** If max agent invocations or runtime timeouts are reached, fails closed to `NEEDS_REVIEW`.
+
+### 6.2 Stateless Reconstructible URL & Task Context
+Because a hosted TinyFish Agent cannot attach to a local Playwright browser process, the Recovery Agent constructs a standalone, reconstructible recovery task:
+1. **Stateless URL:** Uses a query-parameterized GET search URL template (e.g. `https://robu.in/?s={query}`) when configured; otherwise falls back to the approved entry URL.
+2. **Prior Completed Inputs:** Supplies exact prior inputs (e.g. `{ query: "Arduino Uno" }`) executed up to the failing step.
+3. **Structured Prompt Context:** Passes the failed step ID, old locator strategy, failure exception message, expected postcondition, and sanitized DOM accessibility snippet.
+4. **Binding Rationale:** Instructs TinyFish to synthesize a resilient candidate locator grounded in stable accessible attributes (role, label, placeholder, testid, text, nearby structure). The agent is explicitly prohibited from simply returning a static shopping answer as a substitute for repairing the locator binding.
+
+### 6.3 Promotion Gate & Rollback Guarantees
+1. **Immutability of Active Skill:** The active version vN is preserved completely unchanged in SQLite while recovery runs.
+2. **Strict Candidate Status:** The Recovery Agent saves vN+1 with `status = "CANDIDATE"`. It possesses zero permissions to mark an adapter `ACTIVE`.
+3. **2-Query Independent Gate:** The candidate adapter is replayed against two distinct unseen queries using local Playwright. Both results are deterministically evaluated by the Validator Worker.
+4. **Atomic Promotion:** If and only if both queries pass validation, `repo.promoteSiteAdapter()` atomically updates vN+1 to `ACTIVE` and supersedes vN to `RETIRED` within a single SQLite transaction.
+5. **Rollback Safety:** If any query fails, active version vN is retained and the job transitions to `NEEDS_REVIEW`. If needed, `repo.rollbackSiteAdapter(domain, previousVersion)` atomically restores previous versions without data loss.
+6. **Subsequent Replay Proof:** Once promoted, subsequent executions for any query on that domain run on local Playwright with strictly **zero TinyFish Agent calls**.
+
+
 
