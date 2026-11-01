@@ -99,6 +99,7 @@ export type RunEvent = z.infer<typeof RunEventSchema>;
 // ============================================================================
 
 export const SemanticRoleSchema = z.enum([
+  "PAGE_ROOT",
   "SEARCH_INPUT",
   "SEARCH_BUTTON",
   "PRODUCT_CARD",

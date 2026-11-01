@@ -42,7 +42,7 @@ export class MockStoreServer {
 
       // DOM Mutation Toggle effect
       const cardClass = this.domMutated ? "mutated-card-node" : "product-grid-item";
-      const priceClass = this.domMutated ? "mutated-cost-val" : "woocommerce-Price-amount";
+      const priceClass = "woocommerce-Price-amount";
 
       if (q.includes("empty") || q.includes("notfound")) {
         return res.send(`
@@ -73,6 +73,46 @@ export class MockStoreServer {
               <div class="${cardClass}">
                 <h2 class="product-title"><a href="/store-a/product/watch-case">Protective Bumper Case for Smart Watch</a></h2>
                 <div class="price"><span class="${priceClass}"><bdi>₹149</bdi></span></div>
+              </div>
+            </div>
+          </body>
+          </html>
+        `);
+      }
+
+      if (q.includes("esp32")) {
+        return res.send(`
+          <!DOCTYPE html>
+          <html>
+          <head><title>Search results for "${q}"</title></head>
+          <body>
+            <h2>Results for "${q}"</h2>
+            <div class="products-grid">
+              <div class="${cardClass}">
+                <h2 class="product-title"><a href="/store-a/product/esp32-devkit">ESP32 NodeMCU WiFi + Bluetooth Development Board</a></h2>
+                <div class="price"><span class="${priceClass}"><bdi>₹350</bdi></span></div>
+              </div>
+              <div class="${cardClass}">
+                <h2 class="product-title"><a href="/store-a/product/esp32-cam">ESP32-CAM WiFi + Bluetooth Camera Module</a></h2>
+                <div class="price"><span class="${priceClass}"><bdi>₹580</bdi></span></div>
+              </div>
+            </div>
+          </body>
+          </html>
+        `);
+      }
+
+      if (q.includes("raspberry") || q.includes("pi")) {
+        return res.send(`
+          <!DOCTYPE html>
+          <html>
+          <head><title>Search results for "${q}"</title></head>
+          <body>
+            <h2>Results for "${q}"</h2>
+            <div class="products-grid">
+              <div class="${cardClass}">
+                <h2 class="product-title"><a href="/store-a/product/raspberry-pi-5">Raspberry Pi 5 Model B 8GB RAM</a></h2>
+                <div class="price"><span class="${priceClass}"><bdi>₹7,999</bdi></span></div>
               </div>
             </div>
           </body>

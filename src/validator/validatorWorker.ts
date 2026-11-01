@@ -288,7 +288,7 @@ export class ValidatorWorker {
   }
 
   private checkFreshness(output: Record<string, unknown>): boolean {
-    const rawTime = output.retrievalTime || output.timestamp;
+    const rawTime = output.retrievalTime || output.retrievedAt || output.timestamp;
     if (typeof rawTime !== "string") {
       return false;
     }

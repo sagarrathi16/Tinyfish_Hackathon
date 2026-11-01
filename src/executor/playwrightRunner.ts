@@ -303,6 +303,7 @@ export class PlaywrightRunner {
         currency: topCard.currency,
         productUrl: topCard.url,
         evidenceUrl: page.url(),
+        retrievalTime: new Date().toISOString(),
         retrievedAt: new Date().toISOString(),
       };
 
