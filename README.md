@@ -95,3 +95,4 @@ Visit `http://localhost:3000/health` or open `http://localhost:3000` in your bro
 * **Automated Redaction:** All structured logs automatically redact tokens, authorization headers, and cookies.
 * **Read-Only on Live Sites:** Live third-party sites are strictly read-only. All destructive or DOM-mutation tests run on an owned local fixture.
 * **SSRF Protection:** Navigation boundaries strictly block private IP ranges, localhost (except for fixture tests), and cloud metadata endpoints.
+

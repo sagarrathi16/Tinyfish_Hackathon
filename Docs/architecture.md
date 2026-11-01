@@ -1,0 +1,235 @@
+# ShadowTwin — Architecture & Data Model
+
+This document specifies the persistence architecture, core data contracts, entity relationships, and transactional lifecycle for ShadowTwin.
+
+---
+
+## 1. System Overview
+
+ShadowTwin is a multi-agent workflow compilation, deterministic replay, and autonomous self-healing execution runtime.
+
+```mermaid
+flowchart TD
+    subgraph ORCHESTRATION["Deterministic Orchestration Layer"]
+        SM["Finite State Machine<br/>(Promotion Authority)"]
+        REPO["Transactional SQLite Store<br/>(WAL Mode / Atomic Transactions)"]
+    end
+
+    subgraph AGENTS["Intelligence & Learning Agents"]
+        EXP["Explorer Agent<br/>(TinyFish Automation API)"]
+        COMP["Compiler Agent<br/>(Trace -> Template + Adapters)"]
+        REC["Recovery Agent<br/>(TinyFish Reconstructible URL Healing)"]
+    end
+
+    subgraph WORKERS["Deterministic Workers"]
+        EXEC["Executor Worker<br/>(Local Playwright Replay - 0 Tokens)"]
+        VAL["Validator Worker<br/>(Deterministic Schema & Postcondition Authority)"]
+        BENCH["Benchmark Worker<br/>(Telemetry & Transfer Metrics)"]
+    end
+
+    EXP -->|Candidate Bindings| COMP
+    COMP -->|Candidate SiteAdapter| REPO
+    VAL -->|PASS / FAIL| SM
+    SM -->|Atomic Promotion| REPO
+    REPO -->|Active Adapter| EXEC
+    EXEC -->|Postcondition Fail| REC
+    REC -->|Candidate Patch vNext| REPO
+```
+
+---
+
+## 2. Entity-Relationship Data Model
+
+The persistence layer uses SQLite (via `better-sqlite3`) configured with Write-Ahead Logging (`PRAGMA journal_mode = WAL`) and foreign key enforcement.
+
+```mermaid
+erDiagram
+    SKILLS ||--o{ SITE_ADAPTERS : "binds to domain"
+    JOBS ||--|{ RUN_EVENTS : "emits ordered"
+    JOBS ||--|{ RUNS : "contains tasks"
+    RUNS ||--o| VALIDATION_RECORDS : "evaluated by"
+    JOBS ||--o{ BENCHMARK_RECORDS : "measures"
+    JOBS ||--o{ TRACES : "captures"
+
+    SKILLS {
+        string id PK "UUID"
+        string name "Task Name"
+        string task_type "e.g. PRODUCT_LOOKUP"
+        string version "SemVer format (e.g. 1.0.0)"
+        string status "CANDIDATE | ACTIVE | RETIRED"
+        string data_json "Complete validated Skill JSON"
+        string created_at "ISO-8601"
+        string updated_at "ISO-8601"
+        string promoted_at "ISO-8601 (nullable)"
+    }
+
+    SITE_ADAPTERS {
+        string domain PK "Target domain (e.g. robu.in)"
+        string version PK "SemVer format"
+        string status "CANDIDATE | ACTIVE | RETIRED"
+        string data_json "Complete validated SiteAdapter JSON"
+        string created_at "ISO-8601"
+        string promoted_at "ISO-8601 (nullable)"
+    }
+
+    JOBS {
+        string job_id PK "UUID"
+        string state "FSM State"
+        string site "Target domain"
+        string query "Search query"
+        string data_json "Job parameters"
+        string created_at "ISO-8601"
+        string updated_at "ISO-8601"
+    }
+
+    RUN_EVENTS {
+        int sequence_id PK "Auto-increment ordering"
+        string event_id UK "UUID"
+        string job_id "FK to JOBS"
+        string run_id "UUID"
+        string agent_role "Agent Role enum"
+        string state "Workflow State"
+        string site "Target domain"
+        string step_id "Step identifier"
+        string timestamp "ISO-8601"
+        string data_json "Event payload summary"
+    }
+
+    RUNS {
+        string task_id PK "UUID"
+        string job_id "FK to JOBS"
+        string role "Agent Role"
+        string status "RUNNING | SUCCESS | FAILED | STUCK"
+        string task_json "AgentTask envelope"
+        string result_json "AgentResult envelope (nullable)"
+        string created_at "ISO-8601"
+        string completed_at "ISO-8601 (nullable)"
+    }
+
+    VALIDATION_RECORDS {
+        string validation_id PK "UUID"
+        string status "PASS | FAIL | NEEDS_REVIEW | BLOCKED"
+        string data_json "ValidationResult envelope"
+        string validated_at "ISO-8601"
+    }
+
+    BENCHMARK_RECORDS {
+        string benchmark_id PK "UUID"
+        string trial_type "COLD | WARM | CROSS_SITE | RECOVERY"
+        string site "Domain"
+        string query "Search query"
+        int success "0 or 1"
+        float latency_ms "Execution duration"
+        float total_cost_usd "Measured dollar cost"
+        string data_json "BenchmarkRecord envelope"
+        string executed_at "ISO-8601"
+    }
+
+    TRACES {
+        string trace_id PK "UUID"
+        string job_id "FK to JOBS"
+        string run_id "UUID"
+        string trace_type "PLAYWRIGHT | TINYFISH"
+        string data_json "Trace payload"
+        string created_at "ISO-8601"
+    }
+```
+
+---
+
+## 3. Database Schema Specification
+
+### 3.1 Tables & Indexes
+```sql
+CREATE TABLE IF NOT EXISTS site_adapters (
+  domain TEXT NOT NULL,
+  version TEXT NOT NULL,
+  status TEXT NOT NULL,
+  data_json TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  promoted_at TEXT,
+  PRIMARY KEY (domain, version)
+);
+
+CREATE TABLE IF NOT EXISTS skills (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  task_type TEXT NOT NULL,
+  version TEXT NOT NULL,
+  status TEXT NOT NULL,
+  data_json TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  promoted_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS run_events (
+  sequence_id INTEGER PRIMARY KEY AUTOINCREMENT,
+  event_id TEXT UNIQUE NOT NULL,
+  job_id TEXT NOT NULL,
+  run_id TEXT NOT NULL,
+  agent_role TEXT NOT NULL,
+  state TEXT NOT NULL,
+  site TEXT NOT NULL,
+  step_id TEXT,
+  timestamp TEXT NOT NULL,
+  data_json TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS runs (
+  task_id TEXT PRIMARY KEY,
+  job_id TEXT NOT NULL,
+  role TEXT NOT NULL,
+  status TEXT NOT NULL,
+  task_json TEXT NOT NULL,
+  result_json TEXT,
+  created_at TEXT NOT NULL,
+  completed_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS validation_records (
+  validation_id TEXT PRIMARY KEY,
+  status TEXT NOT NULL,
+  data_json TEXT NOT NULL,
+  validated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS benchmark_records (
+  benchmark_id TEXT PRIMARY KEY,
+  trial_type TEXT NOT NULL,
+  site TEXT NOT NULL,
+  query TEXT NOT NULL,
+  success INTEGER NOT NULL,
+  latency_ms REAL NOT NULL,
+  total_cost_usd REAL NOT NULL,
+  data_json TEXT NOT NULL,
+  executed_at TEXT NOT NULL
+);
+
+-- Performance and lookup indexes
+CREATE INDEX IF NOT EXISTS idx_site_adapters_domain_status ON site_adapters (domain, status);
+CREATE INDEX IF NOT EXISTS idx_skills_task_status ON skills (task_type, status);
+CREATE INDEX IF NOT EXISTS idx_run_events_job ON run_events (job_id, sequence_id ASC);
+CREATE INDEX IF NOT EXISTS idx_runs_job ON runs (job_id);
+CREATE INDEX IF NOT EXISTS idx_benchmarks_site ON benchmark_records (site);
+```
+
+---
+
+## 4. Key Persistence Patterns
+
+### 4.1 Atomic Version Promotion
+A site adapter or skill cannot be modified in place. When a candidate adapter (e.g. self-healed `v1.1.0`) passes independent validation:
+1. The Orchestrator initiates an immediate database transaction (`db.transaction()`).
+2. Any existing `ACTIVE` adapter for that domain is marked `RETIRED`, updating both the relational column and the embedded `data_json`.
+3. The candidate version is marked `ACTIVE` with a timestamp recorded in `promoted_at`.
+4. This guarantees that at any point in time, exactly one `ACTIVE` adapter exists per domain.
+
+### 4.2 Rollback & History Lookup
+Because historical versions are marked `RETIRED` rather than deleted, the Orchestrator can immediately query historical versions by `(domain, version)` for diagnostic comparison or immediate rollback.
+
+### 4.3 Strict Sequence Event Ordering
+The `run_events` table uses an auto-incrementing integer primary key (`sequence_id`) in addition to ISO-8601 timestamps. This guarantees that event streams queried by `job_id` preserve strictly deterministic execution ordering even when multiple events occur within the same millisecond.
+
+### 4.4 Disposable Demo Dataset Reset
+The `resetDemoStorage()` method purges all rows from `jobs`, `runs`, `run_events`, `validation_records`, `benchmark_records`, `skills`, and `site_adapters`. It guarantees a clean reset before every stage presentation while **never modifying source files, `.env`, or configuration files**.

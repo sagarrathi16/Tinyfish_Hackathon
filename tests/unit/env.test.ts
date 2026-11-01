@@ -77,3 +77,4 @@ describe("Environment Configuration & Security Boundary", () => {
     expect((sanitized.nested as Record<string, unknown>).authorization).toBe("Bea...ken");
   });
 });
+

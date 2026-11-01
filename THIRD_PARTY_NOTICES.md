@@ -37,3 +37,4 @@ This project incorporates dependencies, APIs, and architectural patterns from th
 ### 2.4 Official TinyFish Platform & SDK
 * **Source:** `https://docs.tinyfish.ai`
 * **Usage:** Official REST Automation API (`/v1/automation/run` & `/run-sse`), Browser CDP API, and MCP tools under TinyFish terms of service.
+

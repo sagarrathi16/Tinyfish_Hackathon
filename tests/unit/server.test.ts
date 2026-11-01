@@ -52,3 +52,4 @@ describe("Server Entry Point & Health Endpoints", () => {
     expect(Array.isArray(data.allowedTargetDomains)).toBe(true);
   });
 });
+
