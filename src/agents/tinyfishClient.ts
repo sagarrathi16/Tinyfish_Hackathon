@@ -85,7 +85,17 @@ export class TinyFishClient {
             output_schema: params.outputSchema,
           };
 
-          const response: AgentRunResponse = await this.client.agent.run(runParams);
+          const timeoutPromise = new Promise<never>((_, reject) => {
+            setTimeout(
+              () => reject(new Error(`TinyFish execution timed out after ${timeoutMs}ms`)),
+              timeoutMs
+            );
+          });
+
+          const response: AgentRunResponse = await Promise.race([
+            this.client.agent.run(runParams),
+            timeoutPromise,
+          ]);
 
           clearTimeout(timer);
 

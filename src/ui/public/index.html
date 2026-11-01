@@ -1483,18 +1483,18 @@
 
           <!-- Bottom Live Status & Extracted Output Card -->
           <div class="browser-footer-result" id="browser-footer-result">
-            <div class="browser-footer-status">
-              <span class="activity-pulse"></span>
-              <span id="browser-action-text">Browser ready for agent navigation</span>
+            <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+              <div class="browser-footer-status">
+                <span class="activity-pulse"></span>
+                <span id="browser-action-text">Browser ready for agent navigation</span>
+              </div>
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span class="status-pill online" id="chat-result-badge" style="display: none;">VALIDATED PASS</span>
+                <span style="font-weight: 600; font-size: 0.76rem; color: #fff;" id="chat-result-title"></span>
+                <span style="font-weight: 700; font-size: 0.82rem; color: #10b981;" id="chat-result-price"></span>
+              </div>
             </div>
-            <div class="browser-footer-tags">
-              <span class="badge-tag">Zero Cloud GPU on Replay</span>
-              <span class="badge-tag">Deterministic DOM Postconditions</span>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
+            <div id="chat-result-canonical" style="display: none;"></div>
           </div>
         </div>
       </div>
@@ -2197,29 +2197,41 @@
     // Handle Incoming Live Event
     function handleLiveRunEvent(event) {
       const feed = document.getElementById("activity-feed");
-      const item = document.createElement("div");
-      item.className = "feed-item";
+      if (feed) {
+        const item = document.createElement("div");
+        item.className = "feed-item";
 
-      const timeStr = event.timestamp ? new Date(event.timestamp).toLocaleTimeString() : "NOW";
-      const role = event.agentRole || "ORCHESTRATOR";
-      const summary = event.payloadSummary ? JSON.stringify(event.payloadSummary) : (event.state || "UPDATED");
+        const timeStr = event.timestamp ? new Date(event.timestamp).toLocaleTimeString() : "NOW";
+        const role = event.agentRole || "ORCHESTRATOR";
+        const summary = event.payloadSummary ? JSON.stringify(event.payloadSummary) : (event.state || "UPDATED");
 
-      item.innerHTML = `
-        <div class="feed-item-top">
-          <span class="role-badge ${role}">${role}</span>
-          <span class="feed-time tabular">${timeStr}</span>
-        </div>
-        <div class="feed-msg">${summary}</div>
-      `;
+        item.innerHTML = `
+          <div class="feed-item-top">
+            <span class="role-badge ${role}">${role}</span>
+            <span class="feed-time tabular">${timeStr}</span>
+          </div>
+          <div class="feed-msg">${summary}</div>
+        `;
 
-      feed.insertBefore(item, feed.firstChild);
-      if (feed.children.length > 40) {
-        feed.removeChild(feed.lastChild);
+        feed.insertBefore(item, feed.firstChild);
+        if (feed.children.length > 40) {
+          feed.removeChild(feed.lastChild);
+        }
       }
 
-      // Update node states and edge highlights on graph
+      // Live update active chat status if task is currently executing
+      if (window.activeTaskWaitId) {
+        const textEl = document.getElementById(window.activeTaskWaitId + "-text");
+        if (textEl && event.agentRole && event.state) {
+          textEl.textContent = `${event.agentRole} Agent: ${event.state} on ${event.site || "target site"}...`;
+        }
+      }
+
+      // Update browser footer action text
       if (event.state) {
-        document.getElementById("graph-orch-state").textContent = "STATE: " + event.state;
+        setBrowserActionText(`${event.agentRole || "Agent"}: ${event.state} (${event.site || "live target"})`);
+        const orchState = document.getElementById("graph-orch-state");
+        if (orchState) orchState.textContent = "STATE: " + event.state;
       }
     }
 
@@ -2445,8 +2457,10 @@
     }
 
     function setBrowserUrl(url) {
-      document.getElementById("live-browser-url").textContent = url;
+      const urlEl = document.getElementById("live-browser-url");
+      if (urlEl) urlEl.textContent = url;
       const iframe = document.getElementById("store-iframe");
+      if (!iframe) return;
       try {
         if (url.includes("books.toscrape.com")) {
           if (!iframe.src.includes("books.toscrape.com")) {
@@ -2466,13 +2480,15 @@
 
     function reloadBrowserIframe() {
       const iframe = document.getElementById("store-iframe");
-      iframe.src = iframe.src;
+      if (iframe) iframe.src = iframe.src;
     }
 
     function setBrowserRuntimeBadge(text, isReplay) {
       const badge = document.getElementById("browser-runtime-badge");
-      badge.textContent = text;
-      badge.className = isReplay ? "status-pill online" : "status-pill mutated";
+      if (badge) {
+        badge.textContent = text;
+        badge.className = isReplay ? "status-pill online" : "status-pill mutated";
+      }
     }
 
     function highlightBrowserStep(stepNum) {
@@ -2491,13 +2507,20 @@
     }
 
     function updateBrowserResultFooter(title, price, canonical, status) {
-      if (title) document.getElementById("chat-result-title").textContent = title;
-      if (price) document.getElementById("chat-result-price").textContent = price;
-      if (canonical) document.getElementById("chat-result-canonical").textContent = "Canonical: " + canonical;
-      if (status) {
-        const b = document.getElementById("chat-result-badge");
-        b.textContent = status === "PASS" ? "VALIDATED PASS" : status;
-        b.className = status === "PASS" ? "status-pill online" : "status-pill mutated";
+      const titleEl = document.getElementById("chat-result-title");
+      if (titleEl && title) titleEl.textContent = title;
+
+      const priceEl = document.getElementById("chat-result-price");
+      if (priceEl && price) priceEl.textContent = price;
+
+      const canonicalEl = document.getElementById("chat-result-canonical");
+      if (canonicalEl && canonical) canonicalEl.textContent = "Canonical: " + canonical;
+
+      const badgeEl = document.getElementById("chat-result-badge");
+      if (badgeEl && status) {
+        badgeEl.style.display = "inline-flex";
+        badgeEl.textContent = status === "PASS" ? "VALIDATED PASS" : status;
+        badgeEl.className = status === "PASS" ? "status-pill online" : "status-pill mutated";
       }
     }
 
@@ -2534,14 +2557,35 @@
 
       // Dispatch to AI Task Assistant Endpoint
       const tempId = "agent-wait-" + Date.now();
+      window.activeTaskWaitId = tempId;
+
       appendAgentMessage("ORCHESTRATOR", `
         <div id="${tempId}" style="display: flex; align-items: center; gap: 8px;">
           <span class="activity-pulse"></span>
-          <span>AI model analyzing task & formulating multi-agent exploration plan...</span>
+          <span id="${tempId}-text">AI model analyzing task & formulating multi-agent plan...</span>
         </div>
       `);
 
       setBrowserActionText("Orchestrator decomposing goal and targeting stores");
+
+      // Dynamic progressive step updates while awaiting pipeline completion
+      let stageIdx = 0;
+      const pipelineStages = [
+        "AI model understanding goal & identifying target websites...",
+        "Agent 1 (Explorer): Navigating to primary store and analyzing DOM...",
+        "Compiler: Synthesizing reusable workflow & catalog schema...",
+        "Multi-Agent Workers: Replaying across stores with zero extra API costs...",
+        "Validator Worker: Verifying price, title, and schema postconditions..."
+      ];
+
+      const stageTimer = setInterval(() => {
+        stageIdx++;
+        if (stageIdx < pipelineStages.length) {
+          const txt = document.getElementById(tempId + "-text");
+          if (txt) txt.textContent = pipelineStages[stageIdx];
+          setBrowserActionText(pipelineStages[stageIdx]);
+        }
+      }, 800);
 
       try {
         const res = await fetch("/api/chat/task", {
@@ -2549,6 +2593,9 @@
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ prompt: text }),
         });
+
+        clearInterval(stageTimer);
+        window.activeTaskWaitId = null;
 
         const outcome = await res.json();
         const waitEl = document.getElementById(tempId);

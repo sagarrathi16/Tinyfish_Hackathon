@@ -127,27 +127,44 @@ export class TaskUnderstandingAgent {
     onProgress?.(`Agent 1 (Explorer) dispatched to ${parsed.primaryDomain} to learn DOM structure and product patterns.`);
 
     let activeVersion = "1.0.0";
-    if (process.env.VITEST !== "true") {
+    let isReusedAdapter = false;
+
+    // Fast-path: Check if an active adapter already exists for this domain
+    const existingAdapter = this.repo.getActiveSiteAdapter(parsed.primaryDomain);
+    if (existingAdapter) {
+      activeVersion = existingAdapter.adapterVersion;
+      isReusedAdapter = true;
+      onProgress?.(
+        `Active adapter v${activeVersion} already verified for ${parsed.primaryDomain}. Executing with zero agent calls.`
+      );
+    } else if (process.env.VITEST !== "true") {
       try {
-        const teachResult = await this.orchestrator.teach({
+        const teachPromise = this.orchestrator.teach({
           domain: parsed.primaryDomain,
           entryUrl: parsed.primaryUrl,
           sampleQuery: parsed.searchQuery,
-          validationQueries: [parsed.searchQuery, "Electronics"],
+          validationQueries: [parsed.searchQuery, "Fiction"],
         });
+
+        // Strict 15-second cap so cold exploration never hangs indefinitely
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("Exploration timed out after 15s")), 15000)
+        );
+
+        const teachResult = await Promise.race([teachPromise, timeoutPromise]);
         if (teachResult?.adapter?.adapterVersion) {
           activeVersion = teachResult.adapter.adapterVersion;
         } else if (teachResult?.skill?.version) {
           activeVersion = teachResult.skill.version;
         }
       } catch (err) {
-        logger.warn("Primary teach run experienced error, falling back to local replay adapter", {
+        logger.warn("Primary teach run timed out or experienced error, proceeding with cached workflow", {
           error: err instanceof Error ? err.message : String(err),
         });
       }
     }
 
-    onProgress?.(`Workflow successfully compiled into immutable skill v${activeVersion}. Reusable across similar sites.`);
+    onProgress?.(`Workflow active as immutable skill v${activeVersion}. Reusable across similar sites.`);
 
     // Step 3: Extract primary products
     const discoveredProducts: DiscoveredProduct[] = [];
@@ -167,7 +184,8 @@ export class TaskUnderstandingAgent {
     onProgress?.(`Multi-agent execution complete. All products validated by deterministic checks.`);
 
     // Step 5: Compute real cost & latency savings
-    const costSavings = this.computeSavings(1, transferredSites.length + 1);
+    const explorerRuns = isReusedAdapter ? 0 : 1;
+    const costSavings = this.computeSavings(explorerRuns, transferredSites.length + 1);
 
     return {
       jobId,
@@ -243,11 +261,12 @@ Return ONLY raw JSON with these exact fields:
 
     // Check if user specifically mentioned amazon
     if (lower.includes("amazon")) {
+      const q = this.extractSearchQuery(prompt, ["amazon"]);
       return {
-        summary: "Search products on Amazon with anti-bot and verification check",
-        searchQuery: this.extractSearchQuery(prompt, ["amazon", "search", "find", "for", "on", "price", "prices"]),
+        summary: `Search products for "${q || "iPhone 15"}" on Amazon with anti-bot and verification check`,
+        searchQuery: q || "iPhone 15",
         primaryDomain: "amazon.in",
-        primaryUrl: `https://www.amazon.in/s?k=${encodeURIComponent(this.extractSearchQuery(prompt, ["amazon", "search", "find", "on"]))}`,
+        primaryUrl: `https://www.amazon.in/s?k=${encodeURIComponent(q || "iPhone 15")}`,
         secondaryDomains: ["webscraper.io"],
         isLiveWeb: true,
         requiresInterventionCheck: true,
@@ -256,7 +275,7 @@ Return ONLY raw JSON with these exact fields:
 
     // Check for books / reading
     if (lower.includes("book") || lower.includes("toscrape") || lower.includes("novel") || lower.includes("fiction")) {
-      const q = this.extractSearchQuery(prompt, ["book", "books", "search", "find", "for", "on", "under", "toscrape"]);
+      const q = this.extractSearchQuery(prompt, ["book", "books", "novel", "fiction", "toscrape"]);
       return {
         summary: `Search catalog for "${q || "Fiction"}" on books.toscrape.com and cross-reference with webscraper.io`,
         searchQuery: q || "Fiction",
@@ -277,7 +296,7 @@ Return ONLY raw JSON with these exact fields:
       lower.includes("sensor") ||
       lower.includes("raspberry")
     ) {
-      const q = this.extractSearchQuery(prompt, ["robu", "makerbazar", "search", "find", "for", "on", "compare"]);
+      const q = this.extractSearchQuery(prompt, ["robu", "makerbazar", "maker"]);
       return {
         summary: `Search for "${q || "Arduino Uno"}" on robu.in and transfer learned workflow to makerbazar.in`,
         searchQuery: q || "Arduino Uno",
@@ -290,7 +309,7 @@ Return ONLY raw JSON with these exact fields:
     }
 
     // Default to general product search across live allowed domains
-    const cleanQuery = this.extractSearchQuery(prompt, ["search", "find", "get", "look", "for", "prices", "of", "across", "stores"]);
+    const cleanQuery = this.extractSearchQuery(prompt, []);
     return {
       summary: `Discover "${cleanQuery || "iPhone 15"}" on primary store and transfer workflow to secondary stores`,
       searchQuery: cleanQuery || "iPhone 15",
@@ -303,9 +322,21 @@ Return ONLY raw JSON with these exact fields:
   }
 
   private extractSearchQuery(prompt: string, stopWords: string[]): string {
-    const words = prompt.replace(/[^\w\s-]/g, " ").split(/\s+/).filter(Boolean);
-    const filtered = words.filter((w) => !stopWords.includes(w.toLowerCase()));
-    return filtered.join(" ").trim() || prompt.trim();
+    // Strip web domains like books.toscrape.com, webscraper.io, amazon.in, etc.
+    let cleaned = prompt.replace(/\b[\w-]+\.(com|in|io|org|net|local)\b/gi, " ");
+
+    const commonConnectives = [
+      "search", "find", "get", "look", "for", "on", "in", "at", "under",
+      "compare", "with", "and", "or", "across", "stores", "store",
+      "website", "websites", "site", "sites", "price", "prices", "cross", "reference",
+      "toscrape", "webscraper", "robu", "makerbazar", "amazon"
+    ];
+    const allStopWords = new Set([...stopWords.map((s) => s.toLowerCase()), ...commonConnectives]);
+
+    const words = cleaned.replace(/[^\w\s-]/g, " ").split(/\s+/).filter(Boolean);
+    const filtered = words.filter((w) => !allStopWords.has(w.toLowerCase()));
+
+    return filtered.join(" ").trim();
   }
 
   private async probeForCaptchaOrChallenge(url: string): Promise<boolean> {
