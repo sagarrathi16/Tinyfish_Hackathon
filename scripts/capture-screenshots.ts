@@ -48,14 +48,16 @@ async function main() {
     await page.goto(`${baseUrl}/index.html`, { waitUntil: "networkidle" });
     await page.waitForTimeout(500);
 
-    // Screen A: Mission Control Network Graph
+    // Screen 1: Flagship AI Agent Chat & Live Browser Simulation
     await page.screenshot({
-      path: path.join(outDir, "01-neural-mission-control-1440.png"),
+      path: path.join(outDir, "01-agent-chat-and-live-browser-1440.png"),
       fullPage: false,
     });
-    console.log("  - 01-neural-mission-control-1440.png saved");
+    console.log("  - 01-agent-chat-and-live-browser-1440.png saved");
 
-    // Screen B: Inspector Drawer (click node-orchestrator)
+    // Screen 2: Neural Mission Control Graph & Inspector Drawer
+    await page.click("button[data-screen='mission']");
+    await page.waitForTimeout(300);
     await page.click("#node-orchestrator");
     await page.waitForTimeout(400);
     await page.screenshot({
