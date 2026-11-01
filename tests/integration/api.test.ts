@@ -214,4 +214,22 @@ describe("API Server Endpoints & Studio Telemetry", () => {
     const recData = await recRes.json();
     expect(recData).toHaveProperty("recoveryTrace");
   });
+
+  it("handles conversational multi-agent task execution and returns cost savings via POST /api/chat/task", async () => {
+    const res = await fetch(`${baseUrl}/api/chat/task`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        prompt: "Find books on books.toscrape.com and compare with webscraper.io",
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.status).toBe("SUCCESS");
+    expect(data.parsedTask.primaryDomain).toBe("books.toscrape.com");
+    expect(data.transferredSites).toContain("webscraper.io");
+    expect(data.products.length).toBeGreaterThanOrEqual(2);
+    expect(data.costSavings.savingsPercentage).toBeGreaterThanOrEqual(1);
+  });
 });

@@ -8,6 +8,7 @@ import { ShadowTwinOrchestrator } from "./orchestrator/orchestrator.js";
 import { BenchmarkWorker } from "./benchmark/benchmarkWorker.js";
 import { seedCleanDemo } from "./benchmark/demoSeed.js";
 import { MockStoreServer } from "./fixtures/mockStoreServer.js";
+import { TaskUnderstandingAgent } from "./agents/taskUnderstanding.js";
 import { logger } from "./utils/logger.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -25,6 +26,7 @@ export function createServer(repoOverride?: Repository) {
   const orchestrator = new ShadowTwinOrchestrator(repo);
   const benchmarkWorker = new BenchmarkWorker(repo);
   const mockStore = new MockStoreServer();
+  const taskAgent = new TaskUnderstandingAgent(repo, orchestrator);
 
   // Mount Mock Storefront fixture directly for deterministic zero-dependency stage demos
   app.use(mockStore.getApp());
@@ -256,6 +258,59 @@ export function createServer(repoOverride?: Repository) {
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       logger.error("API /api/transfer error", { error: message });
+      res.status(500).json({ error: message });
+    }
+  });
+
+  // --------------------------------------------------------------------------
+  // Conversational Multi-Agent Assistant Endpoints
+  // --------------------------------------------------------------------------
+
+  /**
+   * Understands natural language task via AI model, explores primary site with Explorer Agent,
+   * compiles reusable workflow, transfers to secondary sites with parallel Playwright workers,
+   * detects CAPTCHA/login walls and pauses for human verification, and reports exact cost savings.
+   */
+  app.post("/api/chat/task", async (req: Request, res: Response) => {
+    try {
+      const { prompt } = req.body;
+      if (!prompt || typeof prompt !== "string") {
+        return res.status(400).json({ error: "prompt string is required" });
+      }
+
+      const parsed = await taskAgent.understand(prompt);
+      const outcome = await taskAgent.runWorkflow(parsed, (msg, meta) => {
+        logger.info(`[TaskAssistant] ${msg}`, meta);
+      });
+
+      res.json(outcome);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error("API /api/chat/task error", { error: message });
+      res.status(500).json({ error: message });
+    }
+  });
+
+  /**
+   * Resumes workflow after user confirms manual CAPTCHA / login verification in live browser
+   */
+  app.post("/api/chat/continue", async (req: Request, res: Response) => {
+    try {
+      const { searchQuery, primaryDomain = "books.toscrape.com", secondaryDomains = ["webscraper.io"] } = req.body;
+      const parsed = {
+        summary: `Resumed search for ${searchQuery} after user verification`,
+        searchQuery: searchQuery || "Product Search",
+        primaryDomain,
+        primaryUrl: `https://${primaryDomain}`,
+        secondaryDomains,
+        isLiveWeb: true,
+        requiresInterventionCheck: false, // User already solved it
+      };
+
+      const outcome = await taskAgent.runWorkflow(parsed);
+      res.json(outcome);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
       res.status(500).json({ error: message });
     }
   });

@@ -18,7 +18,7 @@ export const EnvSchema = z.object({
   DATABASE_URL: z.string().default("data/shadowtwin.db"),
   ALLOWED_TARGET_DOMAINS: z
     .string()
-    .default("robu.in,makerbazar.in,books.toscrape.com,webscraper.io,localhost,127.0.0.1"),
+    .default("robu.in,makerbazar.in,books.toscrape.com,webscraper.io,amazon.in,amazon.com,localhost,127.0.0.1"),
   MAX_CONCURRENT_EXPLORERS: z.coerce.number().int().min(1).default(2),
   MAX_AGENT_RUNS_PER_JOB: z.coerce.number().int().min(1).default(4),
   JOB_TIMEOUT_SECONDS: z.coerce.number().int().min(10).default(300),

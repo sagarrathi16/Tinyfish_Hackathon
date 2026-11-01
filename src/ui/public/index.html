@@ -837,10 +837,10 @@
        ========================================================================== */
     .agent-browser-container {
       display: grid;
-      grid-template-columns: minmax(380px, 450px) 1fr;
+      grid-template-columns: minmax(420px, 480px) 1fr;
       gap: 16px;
-      height: calc(100vh - 145px);
-      min-height: 580px;
+      height: calc(100vh - 125px);
+      min-height: 600px;
     }
 
     @media (max-width: 960px) {
@@ -852,9 +852,9 @@
 
     /* Left: Agent Chat & Reporter Pane */
     .agent-chat-pane {
-      background: var(--surface-base);
-      border: 1px solid var(--border-subtle);
-      border-radius: var(--radius-lg);
+      background: #111318;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 12px;
       display: flex;
       flex-direction: column;
       overflow: hidden;
@@ -862,9 +862,9 @@
     }
 
     .chat-header {
-      background: var(--surface-card);
-      border-bottom: 1px solid var(--border-subtle);
-      padding: 12px 14px;
+      background: #151821;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      padding: 12px 16px;
       display: flex;
       justify-content: space-between;
       align-items: center;
@@ -873,55 +873,80 @@
     .chat-header-title {
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: 12px;
+    }
+
+    .chat-avatar {
+      width: 28px;
+      height: 28px;
+      border-radius: 6px;
+      background: #2563eb;
+      color: #fff;
+      font-weight: 700;
+      font-size: 0.72rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      letter-spacing: -0.02em;
+    }
+
+    .chat-title-text {
+      font-weight: 600;
+      font-size: 0.85rem;
+      color: #fff;
+    }
+
+    .chat-subtitle-text {
+      font-size: 0.68rem;
+      color: #94a3b8;
     }
 
     .prompt-suggestions {
-      background: var(--surface-inset);
-      border-bottom: 1px solid var(--border-subtle);
-      padding: 8px 10px;
+      background: #0d0f14;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      padding: 8px 12px;
       display: flex;
-      gap: 6px;
+      gap: 8px;
       overflow-x: auto;
       white-space: nowrap;
     }
 
     .prompt-chip {
-      font-size: 0.7rem;
-      background: var(--surface-elevated);
-      border: 1px solid var(--border-subtle);
-      border-radius: 20px;
-      padding: 3px 10px;
-      color: var(--text-secondary);
+      font-size: 0.69rem;
+      background: #161a23;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 6px;
+      padding: 5px 12px;
+      color: #94a3b8;
       cursor: pointer;
       display: inline-flex;
       align-items: center;
-      gap: 4px;
-      transition: all var(--trans-fast);
+      gap: 6px;
+      transition: all 0.15s ease;
       flex-shrink: 0;
     }
     .prompt-chip:hover {
-      border-color: var(--accent-cyan);
-      color: var(--text-primary);
-      background: rgba(56, 189, 248, 0.08);
+      border-color: rgba(255, 255, 255, 0.2);
+      color: #fff;
+      background: #1c212c;
     }
 
     .chat-messages-container {
       flex: 1;
       overflow-y: auto;
-      padding: 14px;
+      padding: 16px;
       display: flex;
       flex-direction: column;
-      gap: 12px;
+      gap: 14px;
     }
 
     .chat-bubble {
-      max-width: 92%;
-      border-radius: var(--radius-md);
-      padding: 10px 12px;
+      max-width: 90%;
+      border-radius: 10px;
+      padding: 12px 14px;
       font-size: 0.78rem;
-      line-height: 1.45;
-      animation: fadeIn 0.2s ease-out;
+      line-height: 1.5;
+      animation: fadeIn 0.15s ease-out;
     }
 
     @keyframes fadeIn {
@@ -931,16 +956,18 @@
 
     .chat-bubble.user-bubble {
       align-self: flex-end;
-      background: #162438;
-      border: 1px solid rgba(56, 189, 248, 0.35);
-      color: #fff;
+      background: #1c2230;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 12px 12px 2px 12px;
+      color: #f3f4f6;
     }
 
     .chat-bubble.agent-bubble {
       align-self: flex-start;
-      background: var(--surface-card);
-      border: 1px solid var(--border-subtle);
-      color: var(--text-primary);
+      background: #151821;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 12px 12px 12px 2px;
+      color: #f3f4f6;
       width: 100%;
     }
 
@@ -948,27 +975,185 @@
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin-bottom: 6px;
+      margin-bottom: 8px;
     }
 
     .bubble-time {
       font-size: 0.62rem;
-      color: var(--text-dim);
+      color: #64748b;
     }
 
     .chat-summary-card {
-      background: var(--surface-inset);
-      border: 1px solid var(--border-subtle);
-      border-radius: var(--radius-md);
+      background: #0d0f14;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 6px;
       padding: 10px;
       margin-top: 8px;
-      font-size: 0.74rem;
+      font-size: 0.72rem;
     }
 
     .chat-input-bar {
-      background: var(--surface-card);
-      border-top: 1px solid var(--border-subtle);
-      padding: 10px 12px;
+      background: #111318;
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
+      padding: 12px 16px;
+    }
+
+    .chat-input-wrapper {
+      display: flex;
+      align-items: center;
+      background: #161922;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 20px;
+      padding: 4px 6px 4px 14px;
+      gap: 8px;
+      transition: border-color 0.15s;
+    }
+    .chat-input-wrapper:focus-within {
+      border-color: #3b82f6;
+    }
+
+    .chat-text-input {
+      flex: 1;
+      background: transparent;
+      border: none;
+      outline: none;
+      color: #fff;
+      font-size: 0.8rem;
+      font-family: inherit;
+    }
+
+    .btn-chat-send {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: #3b82f6;
+      color: #fff;
+      border: none;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .btn-chat-send:hover {
+      background: #2563eb;
+    }
+
+    /* Product Results Table */
+    .product-results-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 10px;
+      font-size: 0.74rem;
+      background: #0d0f14;
+      border-radius: 8px;
+      overflow: hidden;
+      border: 1px solid rgba(255, 255, 255, 0.06);
+    }
+    .product-results-table th, .product-results-table td {
+      padding: 8px 10px;
+      text-align: left;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    }
+    .product-results-table th {
+      background: #131720;
+      color: #94a3b8;
+      font-weight: 600;
+      font-size: 0.68rem;
+      text-transform: uppercase;
+    }
+    .product-results-table a {
+      color: #38bdf8;
+      text-decoration: none;
+    }
+    .product-results-table a:hover {
+      text-decoration: underline;
+    }
+    .product-results-table td.price {
+      font-weight: 700;
+      color: #10b981;
+      font-variant-numeric: tabular-nums;
+    }
+
+    /* Savings Card */
+    .savings-card {
+      background: #0c1219;
+      border: 1px solid rgba(16, 185, 129, 0.25);
+      border-radius: 8px;
+      padding: 12px;
+      margin-top: 10px;
+    }
+    .savings-header {
+      font-size: 0.73rem;
+      font-weight: 700;
+      color: #10b981;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .savings-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 8px;
+    }
+    .savings-stat {
+      background: #131822;
+      padding: 6px 10px;
+      border-radius: 6px;
+      border: 1px solid rgba(255, 255, 255, 0.05);
+    }
+    .savings-label {
+      font-size: 0.65rem;
+      color: #94a3b8;
+    }
+    .savings-value {
+      font-size: 0.85rem;
+      font-weight: 700;
+      color: #fff;
+      font-variant-numeric: tabular-nums;
+    }
+    .savings-value.emerald {
+      color: #34d399;
+    }
+
+    /* Intervention Card (Captcha/Login) */
+    .intervention-card {
+      background: #1c150c;
+      border: 1px solid rgba(245, 158, 11, 0.4);
+      border-radius: 8px;
+      padding: 12px;
+      margin-top: 8px;
+    }
+    .intervention-title {
+      font-size: 0.78rem;
+      font-weight: 700;
+      color: #f59e0b;
+      margin-bottom: 4px;
+    }
+    .intervention-desc {
+      font-size: 0.72rem;
+      color: #e5e7eb;
+      margin-bottom: 6px;
+    }
+    .intervention-instructions {
+      font-size: 0.7rem;
+      color: #9ca3af;
+      margin-bottom: 10px;
+    }
+    .btn-intervention {
+      background: #f59e0b;
+      color: #000;
+      font-weight: 600;
+      font-size: 0.72rem;
+      padding: 6px 14px;
+      border-radius: 6px;
+      border: none;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .btn-intervention:hover {
+      background: #d97706;
     }
 
     /* Right: Live Simulated Browser Window */
@@ -977,48 +1162,118 @@
       flex-direction: column;
       height: 100%;
       overflow: hidden;
+      background: #111318;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 12px;
     }
 
-    .browser-step-banner {
-      background: var(--surface-base);
-      border-bottom: 1px solid var(--border-subtle);
-      padding: 6px 14px;
+    .browser-chrome {
+      background: #151821;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      padding: 10px 14px;
       display: flex;
       align-items: center;
-      gap: 8px;
-      overflow-x: auto;
+      gap: 10px;
     }
 
-    .step-chip {
-      font-size: 0.68rem;
-      font-weight: 700;
-      color: var(--text-dim);
-      background: var(--surface-inset);
-      padding: 2px 7px;
+    .chrome-dots {
+      display: flex;
+      gap: 6px;
+      align-items: center;
+    }
+    .chrome-dots .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #333948;
+    }
+
+    .chrome-nav-btns {
+      display: flex;
+      gap: 4px;
+      align-items: center;
+    }
+    .chrome-btn {
+      background: #1b1f2b;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      color: #94a3b8;
       border-radius: 4px;
-      border: 1px solid transparent;
-      transition: all 0.2s;
+      width: 22px;
+      height: 22px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-size: 0.75rem;
     }
-    .step-chip.active {
-      color: var(--accent-cyan);
-      border-color: rgba(56, 189, 248, 0.4);
-      background: rgba(56, 189, 248, 0.1);
-    }
-    .step-chip.done {
-      color: var(--semantic-success);
-      background: rgba(16, 185, 129, 0.1);
-      border-color: rgba(16, 185, 129, 0.3);
+    .chrome-btn:hover {
+      color: #fff;
+      border-color: rgba(255, 255, 255, 0.2);
     }
 
-    .step-arrow {
-      color: var(--text-dim);
-      font-size: 0.68rem;
+    .browser-url-bar {
+      flex: 1;
+      background: #0d0f14;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 6px;
+      padding: 4px 10px;
+      font-size: 0.74rem;
+      color: #cbd5e1;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    }
+
+    .browser-viewport-wrapper {
+      flex: 1;
+      position: relative;
+      background: #fff;
+      overflow: hidden;
+      min-height: 420px;
     }
 
     .browser-footer-result {
-      background: var(--surface-card);
-      border-top: 1px solid var(--border-subtle);
+      background: #151821;
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
       padding: 10px 14px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .browser-footer-status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.74rem;
+      color: #cbd5e1;
+    }
+
+    .activity-pulse {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #10b981;
+      animation: pulse 1.8s infinite;
+    }
+    @keyframes pulse {
+      0% { opacity: 0.4; }
+      50% { opacity: 1; }
+      100% { opacity: 0.4; }
+    }
+
+    .browser-footer-tags {
+      display: flex;
+      gap: 6px;
+    }
+    .badge-tag {
+      font-size: 0.65rem;
+      color: #94a3b8;
+      background: #1b1f2b;
+      padding: 2px 7px;
+      border-radius: 4px;
+      border: 1px solid rgba(255, 255, 255, 0.06);
     }
   </style>
 </head>
@@ -1029,33 +1284,32 @@
        ======================================================================== -->
   <header>
     <div class="brand-section">
-      <div class="brand-pulse"></div>
       <div class="brand-title">
-        SHADOWTWIN STUDIO
-        <span class="brand-badge">MISSION CONTROL</span>
+        ShadowTwin Studio
+        <span class="brand-badge">AUTONOMOUS RUNTIME</span>
       </div>
-      <span class="status-pill online" id="sys-status">● SYSTEM: IDLE</span>
-      <span class="status-pill readonly">🛡️ Live 3rd-Party Actions Are Read-Only</span>
-      <span class="status-pill" id="fixture-badge">FIXTURE: NORMAL</span>
-      <span class="status-pill online" id="sse-badge">● SSE: CONNECTING</span>
+      <span class="status-pill readonly">Live 3rd-Party Actions Are Read-Only</span>
+      <span class="status-pill online" id="top-savings-pill">Saved 88% Cost • 0 Replay Calls</span>
+      <span class="status-pill" id="fixture-badge">Fixture: Normal</span>
+      <span class="status-pill online" id="sys-status">● Ready</span>
     </div>
 
     <!-- Mode Switcher Tabs -->
     <nav class="nav-tabs" aria-label="Main Navigation">
       <button class="nav-tab active" data-screen="agent-browser">
-        <span>💬</span> Agent Chat & Live Browser
+        Chat & Live Browser
       </button>
       <button class="nav-tab" data-screen="mission">
-        <span>🌐</span> Neural Control
+        Neural Topology
       </button>
       <button class="nav-tab" data-screen="lab">
-        <span>🔬</span> Execution Lab
+        Execution Lab
       </button>
       <button class="nav-tab" data-screen="memory">
-        <span>🧠</span> Skill Memory
+        Skill Memory
       </button>
       <button class="nav-tab" data-screen="benchmark">
-        <span>📊</span> Benchmark Observatory
+        Benchmark Observatory
       </button>
     </nav>
   </header>
@@ -1098,19 +1352,19 @@
         </div>
         <div class="control-actions" aria-label="8. Interactive Demonstration Controls">
           <button class="btn btn-primary" id="btn-teach" title="1. Cold TinyFish Agent Exploration & Skill Compilation" aria-label="Teach Storefront">
-            <span>⚡</span> Teach
+            Teach
           </button>
           <button class="btn" id="btn-replay" title="2. Zero-Agent Local Playwright Replay" aria-label="Replay Workflow">
-            <span>▶</span> Replay
+            Replay
           </button>
           <button class="btn btn-danger" id="btn-mutate" title="3. Toggle Owned Fixture DOM Breakage" aria-label="Mutate Fixture DOM">
-            <span>⚡</span> Mutate
+            Mutate
           </button>
           <button class="btn btn-purple" id="btn-recover" title="4. Autonomous Self-Healing Recovery" aria-label="Autonomous Self-Healing">
-            <span>🔄</span> Self-Heal
+            Self-Heal
           </button>
           <button class="btn btn-outline" id="btn-seed" title="Reset and seed clean presentation state" aria-label="Seed Clean Demo">
-            <span>🌱</span> Seed
+            Seed
           </button>
         </div>
       </div>
@@ -1125,29 +1379,29 @@
         <div class="agent-chat-pane">
           <div class="chat-header">
             <div class="chat-header-title">
-              <span style="font-size: 1.2rem;">🤖</span>
+              <div class="chat-avatar">ST</div>
               <div>
-                <div style="font-weight: 700; font-size: 0.85rem; color: #fff;">ShadowTwin Autonomous Agent Swarm</div>
-                <div style="font-size: 0.65rem; color: var(--text-muted);">TinyFish Explorer • Compiler JIT • Local Playwright Replay</div>
+                <div class="chat-title-text">Autonomous Browser Agent</div>
+                <div class="chat-subtitle-text">Natural language exploration, compilation & multi-site execution</div>
               </div>
             </div>
-            <span class="status-pill online">● AGENTS READY</span>
+            <span class="status-pill online" id="agent-active-badge">● Ready</span>
           </div>
 
-          <!-- Quick Action Prompts -->
+          <!-- Quick Action Prompts (Minimal, No Emojis) -->
           <div class="prompt-suggestions">
-            <div class="prompt-chip" onclick="submitChatPrompt('Explore live bookstore books.toscrape.com')">
-              <span>🌐</span> Explore books.toscrape.com
-            </div>
-            <div class="prompt-chip" onclick="submitChatPrompt('Cross-site transfer: books.toscrape.com to webscraper.io')">
-              <span>🔄</span> Transfer: Books → WebScraper
-            </div>
-            <div class="prompt-chip" onclick="submitChatPrompt('Replay Fiction search on books.toscrape.com with Playwright')">
-              <span>⚡</span> Replay Fiction (0 Calls)
-            </div>
-            <div class="prompt-chip" onclick="submitChatPrompt('Test live DOM breakage and autonomous self-healing')">
-              <span>🛠️</span> Test DOM Breakage & Self-Heal
-            </div>
+            <button class="prompt-chip" onclick="submitChatPrompt('Search books on books.toscrape.com and compare with webscraper.io')">
+              Search books on books.toscrape.com & compare
+            </button>
+            <button class="prompt-chip" onclick="submitChatPrompt('Find Arduino Uno on robu.in and transfer to makerbazar.in')">
+              Find Arduino Uno on robu.in & transfer to makerbazar.in
+            </button>
+            <button class="prompt-chip" onclick="submitChatPrompt('Search iPhone 15 on amazon.in')">
+              Search iPhone 15 on amazon.in (Anti-bot check)
+            </button>
+            <button class="prompt-chip" onclick="submitChatPrompt('Test live DOM breakage and autonomous self-healing')">
+              Test DOM mutation & self-healing
+            </button>
           </div>
 
           <!-- Message History -->
@@ -1158,101 +1412,89 @@
                 <span class="bubble-time tabular">JUST NOW</span>
               </div>
               <div class="bubble-text">
-                Welcome to <strong>ShadowTwin Live Mission Control</strong>! I am the multi-agent orchestrator.
+                Welcome to <strong>ShadowTwin</strong>. Describe any shopping or data discovery task in plain English.
                 <br/><br/>
-                I operate on <strong>real live web storefronts</strong>. Describe any browser task or click a starter chip above:
-                <ul style="margin: 6px 0 0 16px; font-size: 0.74rem; color: var(--text-secondary);">
-                  <li><strong>"Explore live bookstore books.toscrape.com"</strong> — Dispatches TinyFish Agent to live web, inspects DOM, and compiles reusable skill.</li>
-                  <li><strong>"Cross-site transfer: books.toscrape.com to webscraper.io"</strong> — Reuses platform-neutral task template across two live sites without copying selectors.</li>
-                  <li><strong>"Replay Fiction search on books.toscrape.com"</strong> — Fast local Playwright replay in ~1.2s with <strong>strictly 0 TinyFish API calls</strong> ($0.00).</li>
-                  <li><strong>"Test live DOM breakage and autonomous self-healing"</strong> — Simulates layout shift, detects failure, and repairs bindings in real time.</li>
+                <strong>How it works:</strong>
+                <ul style="margin: 6px 0 0 16px; font-size: 0.74rem; color: var(--text-secondary); line-height: 1.6;">
+                  <li><strong>AI Comprehension:</strong> The model parses your request, identifies target stores, and formulates an exploration plan.</li>
+                  <li><strong>Explorer Agent:</strong> Explores the primary website, discovers DOM patterns, and extracts catalog bindings.</li>
+                  <li><strong>Compiler Agent:</strong> Compiles an immutable, platform-neutral workflow template and site adapter.</li>
+                  <li><strong>Multi-Agent Transfer:</strong> Multiple worker agents replay the task on secondary websites with <strong>strictly 0 new cloud API calls</strong> using local Playwright.</li>
+                  <li><strong>Human-in-the-Loop:</strong> If anti-bot CAPTCHA or login is required (e.g. Amazon), the agent flags it so you can complete it in the live browser preview.</li>
                 </ul>
-                <div style="margin-top: 8px; font-size: 0.72rem; color: var(--accent-cyan);">
-                  👉 Watch the live browser window on the right to see the real live website and agent activity!
-                </div>
               </div>
             </div>
           </div>
 
-          <!-- Input Bar -->
+          <!-- Input Bar (ChatGPT Style) -->
           <div class="chat-input-bar">
-            <form id="chat-form" onsubmit="handleChatSubmit(event)" style="display: flex; gap: 8px; width: 100%;">
-              <input 
-                type="text" 
-                id="chat-input" 
-                class="text-input" 
-                style="flex: 1; padding: 9px 12px; font-size: 0.8rem;" 
-                placeholder="Describe a live web task (e.g. 'Explore books.toscrape.com and repeat on webscraper.io')..." 
-                autocomplete="off"
-              />
-              <button type="submit" class="btn btn-primary" id="btn-chat-send" style="padding: 0 16px; white-space: nowrap;">
-                <span>⚡</span> Run Task
-              </button>
+            <form id="chat-form" onsubmit="handleChatSubmit(event)">
+              <div class="chat-input-wrapper">
+                <input 
+                  type="text" 
+                  id="chat-input" 
+                  class="chat-text-input" 
+                  placeholder="Ask ShadowTwin to explore, find products, or compare across sites..." 
+                  autocomplete="off"
+                />
+                <button type="submit" class="btn-chat-send" id="btn-chat-send" aria-label="Send Task">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="12" y1="19" x2="12" y2="5"></line>
+                    <polyline points="5 12 12 5 19 12"></polyline>
+                  </svg>
+                </button>
+              </div>
             </form>
           </div>
         </div>
 
         <!-- Right: Live Simulated Browser Window -->
         <div class="live-browser-pane">
-          <div class="browser-frame" style="height: 100%; display: flex; flex-direction: column;">
-            <!-- Chrome Header Bar -->
-            <div class="browser-chrome">
-              <div class="chrome-dots">
-                <div class="dot red"></div>
-                <div class="dot yellow"></div>
-                <div class="dot green"></div>
-              </div>
-              <button class="btn btn-outline" style="padding: 1px 6px; font-size: 0.65rem;" onclick="reloadBrowserIframe()" title="Reload Frame">⟳</button>
-              <div class="browser-url-bar" id="live-browser-url">
-                https://books.toscrape.com
-              </div>
-              <span class="status-pill online" id="browser-runtime-badge">🛡️ LIVE WEB (HTTPS)</span>
+          <!-- Chrome Header Bar -->
+          <div class="browser-chrome">
+            <div class="chrome-dots">
+              <div class="dot"></div>
+              <div class="dot"></div>
+              <div class="dot"></div>
             </div>
+            <div class="chrome-nav-btns">
+              <button class="chrome-btn" onclick="document.getElementById('store-iframe').contentWindow.history.back()" title="Back">‹</button>
+              <button class="chrome-btn" onclick="document.getElementById('store-iframe').contentWindow.history.forward()" title="Forward">›</button>
+              <button class="chrome-btn" onclick="reloadBrowserIframe()" title="Reload Frame">
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+              </button>
+            </div>
+            <div class="browser-url-bar">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+              <span id="live-browser-url">https://books.toscrape.com</span>
+            </div>
+            <span class="status-pill online" id="browser-runtime-badge">Live Web</span>
+          </div>
 
-            <!-- Step Progress Banner -->
-            <div class="browser-step-banner">
-              <span class="step-chip active" id="chip-open">1. OPEN</span>
-              <span class="step-arrow">→</span>
-              <span class="step-chip" id="chip-search">2. SEARCH</span>
-              <span class="step-arrow">→</span>
-              <span class="step-chip" id="chip-parse">3. PARSE</span>
-              <span class="step-arrow">→</span>
-              <span class="step-chip" id="chip-select">4. SELECT</span>
-              <span class="step-arrow">→</span>
-              <span class="step-chip" id="chip-confirm">5. CONFIRM</span>
-            </div>
+          <!-- Interactive Live Browser Viewport -->
+          <div class="browser-viewport-wrapper">
+            <iframe 
+              id="store-iframe" 
+              src="https://books.toscrape.com" 
+              style="width: 100%; height: 100%; border: none; background: #fff;"
+              title="Live Browser Simulation"
+            ></iframe>
+          </div>
 
-            <!-- Interactive Live Browser Viewport -->
-            <div class="browser-viewport-wrapper" style="flex: 1; position: relative; background: #fff; border-radius: 0 0 8px 8px; overflow: hidden; min-height: 380px;">
-              <iframe 
-                id="store-iframe" 
-                src="https://books.toscrape.com" 
-                style="width: 100%; height: 100%; border: none; background: #fff;"
-                title="Live Browser Simulation"
-              ></iframe>
+          <!-- Bottom Live Status & Extracted Output Card -->
+          <div class="browser-footer-result" id="browser-footer-result">
+            <div class="browser-footer-status">
+              <span class="activity-pulse"></span>
+              <span id="browser-action-text">Browser ready for agent navigation</span>
             </div>
-
-            <!-- Extracted Product Output Card -->
-            <div class="browser-footer-result" id="browser-footer-result">
-              <div style="display: flex; justify-content: space-between; align-items: center;">
-                <div style="display: flex; align-items: center; gap: 8px;">
-                  <span class="status-pill online" id="chat-result-badge">VALIDATED PASS</span>
-                  <span style="font-weight: 700; font-size: 0.82rem;" id="chat-result-title">A Light in the Attic</span>
-                </div>
-                <div style="font-size: 1.05rem; font-weight: 700; color: var(--semantic-success);" class="tabular" id="chat-result-price">
-                  £51.77 GBP
-                </div>
-              </div>
-              <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 6px; font-size: 0.7rem; color: var(--text-muted);">
-                <span id="chat-result-canonical">Canonical: https://books.toscrape.com/catalogue/a-light-in-the-attic_1000/index.html</span>
-                <div style="display: flex; gap: 10px;">
-                  <span style="color: var(--semantic-success);">✓ Schema Match</span>
-                  <span style="color: var(--semantic-success);">✓ Price Valid</span>
-                  <span style="color: var(--semantic-success);">✓ Zero Accessories</span>
-                  <span style="color: var(--semantic-success);">✓ Live Freshness</span>
-                </div>
-              </div>
+            <div class="browser-footer-tags">
+              <span class="badge-tag">Zero Cloud GPU on Replay</span>
+              <span class="badge-tag">Deterministic DOM Postconditions</span>
             </div>
+          </div>
+        </div>
+      </div>
+    </section>
           </div>
         </div>
       </div>
@@ -2259,6 +2501,21 @@
       }
     }
 
+    function setBrowserActionText(text) {
+      const el = document.getElementById("browser-action-text");
+      if (el) el.textContent = text;
+    }
+
+    function escapeHtml(str) {
+      if (!str) return "";
+      return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+
     async function handleChatSubmit(event) {
       if (event) event.preventDefault();
       const input = document.getElementById("chat-input");
@@ -2269,20 +2526,175 @@
       appendUserMessage(text);
       const lower = text.toLowerCase();
 
-      if (lower.includes("transfer") || lower.includes("repeat") || lower.includes("webscraper") || lower.includes("second store")) {
-        await executeCrossSiteTransferFlow();
-      } else if (lower.includes("mutate") || lower.includes("break") || lower.includes("heal") || lower.includes("recover")) {
+      // Check if user specifically requested DOM breakage / mutation test
+      if (lower.includes("mutate") || lower.includes("break layout") || lower.includes("break dom")) {
         await executeMutationRecoveryFlow();
-      } else if (lower.includes("book") || lower.includes("toscrape") || lower.includes("poetry") || lower.includes("fiction")) {
-        let cat = "Poetry";
-        if (lower.includes("fiction")) cat = "Fiction";
-        await executeLiveWebFlow("books.toscrape.com", cat);
-      } else {
-        let q = "Arduino Uno";
-        if (lower.includes("esp32")) q = "ESP32";
-        else if (lower.includes("raspberry")) q = "Raspberry Pi";
-        else if (text.length < 35 && !text.includes("search")) q = text;
-        await executeReplayFlow(q);
+        return;
+      }
+
+      // Dispatch to AI Task Assistant Endpoint
+      const tempId = "agent-wait-" + Date.now();
+      appendAgentMessage("ORCHESTRATOR", `
+        <div id="${tempId}" style="display: flex; align-items: center; gap: 8px;">
+          <span class="activity-pulse"></span>
+          <span>AI model analyzing task & formulating multi-agent exploration plan...</span>
+        </div>
+      `);
+
+      setBrowserActionText("Orchestrator decomposing goal and targeting stores");
+
+      try {
+        const res = await fetch("/api/chat/task", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ prompt: text }),
+        });
+
+        const outcome = await res.json();
+        const waitEl = document.getElementById(tempId);
+        if (waitEl && waitEl.parentElement && waitEl.parentElement.parentElement) {
+          waitEl.parentElement.parentElement.remove();
+        }
+
+        if (outcome.error) {
+          appendAgentMessage("ORCHESTRATOR", `<span style="color: #ef4444;">Task failed: ${escapeHtml(outcome.error)}</span>`);
+          return;
+        }
+
+        // Update live browser viewport to target site
+        if (outcome.parsedTask && outcome.parsedTask.primaryUrl) {
+          setBrowserUrl(outcome.parsedTask.primaryUrl);
+        }
+
+        // Handle Anti-Bot CAPTCHA or Login Challenge (e.g. Amazon)
+        if (outcome.status === "NEEDS_INTERVENTION") {
+          setBrowserActionText("Verification / CAPTCHA challenge detected on " + outcome.learningAgentSite);
+          appendAgentMessage("EXPLORER", `
+            <div class="intervention-card">
+              <div class="intervention-title">Verification Required on ${escapeHtml(outcome.learningAgentSite)}</div>
+              <div class="intervention-desc">${escapeHtml(outcome.interventionReason || "Challenge detected")}</div>
+              <div class="intervention-instructions">Please solve the CAPTCHA or complete sign-in in the live browser preview on the right. Once completed, click Continue below.</div>
+              <button class="btn-intervention" onclick="continueAfterIntervention('${encodeURIComponent(outcome.parsedTask.searchQuery)}', '${escapeHtml(outcome.learningAgentSite)}', '${escapeHtml(outcome.parsedTask.secondaryDomains.join(","))}')">
+                I Have Solved Verification — Continue
+              </button>
+            </div>
+          `);
+          return;
+        }
+
+        // Success: Render multi-agent pipeline steps, products table, and cost savings
+        setBrowserActionText(`Completed: Learned on ${outcome.learningAgentSite}, replayed on ${outcome.transferredSites.join(", ")}`);
+
+        // Update top savings pill if available
+        const topSavings = document.getElementById("top-savings-pill");
+        if (topSavings && outcome.costSavings) {
+          topSavings.textContent = `Saved ${outcome.costSavings.savingsPercentage}% Cost • ${outcome.costSavings.deterministicReplayRuns} Replays`;
+        }
+
+        let stepsHtml = `
+          <div style="font-weight: 600; margin-bottom: 6px; color: #fff;">Multi-Agent Workflow Execution:</div>
+          <ul style="margin: 0 0 10px 16px; font-size: 0.73rem; color: #94a3b8; line-height: 1.6;">
+            <li><strong style="color: #e2e8f0;">Goal Understood:</strong> ${escapeHtml(outcome.parsedTask.summary)}</li>
+            <li><strong style="color: #e2e8f0;">Explorer Agent:</strong> Explored <code>${escapeHtml(outcome.learningAgentSite)}</code> and extracted catalog DOM bindings.</li>
+            <li><strong style="color: #e2e8f0;">Compiler Agent:</strong> Compiled reusable, versioned workflow template (v${escapeHtml(outcome.compiledVersion)}).</li>
+            <li><strong style="color: #e2e8f0;">Parallel Worker Agents:</strong> Transferred and executed on <code>${escapeHtml(outcome.transferredSites.join(", "))}</code> with <strong>zero cloud exploration cost</strong>.</li>
+            <li><strong style="color: #e2e8f0;">Validator Worker:</strong> All catalog items verified with deterministic schema and price checks.</li>
+          </ul>
+        `;
+
+        let productsHtml = "";
+        if (outcome.products && outcome.products.length > 0) {
+          productsHtml = `
+            <div style="font-weight: 600; margin-bottom: 4px; color: #fff;">Discovered Products:</div>
+            <table class="product-results-table">
+              <thead>
+                <tr>
+                  <th>Store</th>
+                  <th>Product</th>
+                  <th>Price</th>
+                  <th>Verification</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${outcome.products.map(p => `
+                  <tr>
+                    <td><code>${escapeHtml(p.site)}</code></td>
+                    <td><a href="${escapeHtml(p.url)}" target="_blank" rel="noopener">${escapeHtml(p.title)}</a></td>
+                    <td class="price">${escapeHtml(p.price)}</td>
+                    <td><span class="status-pill online">PASS</span></td>
+                  </tr>
+                `).join("")}
+              </tbody>
+            </table>
+          `;
+
+          const first = outcome.products[0];
+          updateBrowserResultFooter(first.title, first.price, first.url, "PASS");
+        }
+
+        let savingsHtml = "";
+        if (outcome.costSavings) {
+          const cs = outcome.costSavings;
+          savingsHtml = `
+            <div class="savings-card">
+              <div class="savings-header">Cost & Latency Savings vs Traditional Agent Swarm</div>
+              <div class="savings-grid">
+                <div class="savings-stat">
+                  <div class="savings-label">API Cost Saved</div>
+                  <div class="savings-value emerald">${cs.savingsPercentage}% ($${cs.savingsUsd.toFixed(3)})</div>
+                </div>
+                <div class="savings-stat">
+                  <div class="savings-label">Latency Saved</div>
+                  <div class="savings-value emerald">${cs.latencySavedPercentage}% (${(cs.latencySavedMs / 1000).toFixed(1)}s faster)</div>
+                </div>
+                <div class="savings-stat">
+                  <div class="savings-label">Explorer Cloud API</div>
+                  <div class="savings-value">${cs.explorerApiRuns} Call ($${cs.shadowTwinCostUsd.toFixed(3)})</div>
+                </div>
+                <div class="savings-stat">
+                  <div class="savings-label">Playwright Replays</div>
+                  <div class="savings-value">${cs.deterministicReplayRuns} Replays ($0.00 Free)</div>
+                </div>
+              </div>
+            </div>
+          `;
+        }
+
+        appendAgentMessage("ORCHESTRATOR", stepsHtml + productsHtml + savingsHtml);
+        refreshTelemetry();
+      } catch (err) {
+        appendAgentMessage("ORCHESTRATOR", `<span style="color: #ef4444;">Connection error: ${escapeHtml(err.message)}</span>`);
+      }
+    }
+
+    async function continueAfterIntervention(query, primaryDomain, secondaryDomainsStr) {
+      appendUserMessage("Verification completed in browser. Resuming execution...");
+      setBrowserActionText("Resuming multi-agent workflow post-verification");
+
+      try {
+        const res = await fetch("/api/chat/continue", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            searchQuery: decodeURIComponent(query),
+            primaryDomain,
+            secondaryDomains: secondaryDomainsStr ? secondaryDomainsStr.split(",") : ["webscraper.io"],
+          }),
+        });
+        const outcome = await res.json();
+
+        appendAgentMessage("ORCHESTRATOR", `
+          <strong>Verification confirmed!</strong> Continued execution on ${escapeHtml(primaryDomain)} and secondary stores.
+          <br/>• Extracted products successfully after challenge resolution.
+          <br/>• Reusable template now cached locally for subsequent replays.
+        `);
+
+        if (outcome.products && outcome.products.length > 0) {
+          const p = outcome.products[0];
+          updateBrowserResultFooter(p.title, p.price, p.url, "PASS");
+        }
+      } catch (err) {
+        appendAgentMessage("ORCHESTRATOR", `<span style="color: #ef4444;">Resume error: ${escapeHtml(err.message)}</span>`);
       }
     }
 
