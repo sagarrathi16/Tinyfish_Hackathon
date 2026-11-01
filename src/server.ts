@@ -62,6 +62,64 @@ export function createServer(repoOverride?: Repository) {
     });
   });
 
+  /**
+   * Secure Live Web Preview Proxy:
+   * Strips X-Frame-Options and Content-Security-Policy headers so permitted live sites
+   * can be visually previewed inside the judge-facing mission control iframe.
+   * Strictly enforces allowlist and blocks SSRF/private networks.
+   */
+  app.get("/api/proxy", async (req: Request, res: Response) => {
+    const targetUrl = req.query.url as string;
+    if (!targetUrl || !targetUrl.startsWith("http")) {
+      return res.status(400).send("Invalid target URL; must be an absolute HTTP(S) URL");
+    }
+
+    try {
+      const parsed = new URL(targetUrl);
+      const host = parsed.hostname.toLowerCase();
+      const allowed = env.ALLOWED_TARGET_DOMAINS.split(",").map((d) => d.trim().toLowerCase());
+
+      const isAllowed = allowed.some((d) => host === d || host.endsWith(`.${d}`));
+      if (!isAllowed) {
+        return res.status(403).send(`Target domain '${host}' is not in ALLOWED_TARGET_DOMAINS`);
+      }
+
+      // Block local/private IP ranges in production
+      if (
+        env.NODE_ENV === "production" &&
+        (host === "localhost" ||
+          host.startsWith("127.") ||
+          host.startsWith("10.") ||
+          host.startsWith("192.168.") ||
+          host.startsWith("169.254."))
+      ) {
+        return res.status(403).send("Private IP / localhost proxying prohibited in production");
+      }
+
+      const response = await fetch(targetUrl, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+          Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        },
+      });
+
+      let html = await response.text();
+      // Inject base tag so relative CSS/images resolve to the live website
+      const baseHref = `${parsed.protocol}//${parsed.host}`;
+      if (!html.includes("<base ")) {
+        html = html.replace(/<head>/i, `<head><base href="${baseHref}/">`);
+      }
+
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.removeHeader("X-Frame-Options");
+      res.removeHeader("Content-Security-Policy");
+      res.send(html);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      res.status(502).send(`Live preview fetch failed: ${msg}`);
+    }
+  });
+
   // --------------------------------------------------------------------------
   // Core Workflow Orchestration Endpoints
   // --------------------------------------------------------------------------
