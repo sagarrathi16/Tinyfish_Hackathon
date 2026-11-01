@@ -234,3 +234,92 @@ The `run_events` table uses an auto-incrementing integer primary key (`sequence_
 ### 4.4 Disposable Demo Dataset Reset
 The `resetDemoStorage()` method purges all rows from `jobs`, `runs`, `run_events`, `validation_records`, `benchmark_records`, `skills`, and `site_adapters`. It guarantees a clean reset before every stage presentation while **never modifying source files, `.env`, or configuration files**.
 
+---
+
+## 5. Validator Worker & Adversarial Defense Architecture
+
+The **Validator Worker** serves as the independent deterministic authority for execution verification. It never trusts the success labels emitted by the Explorer, Compiler, or Executor.
+
+```mermaid
+flowchart TD
+    ExecResult["AgentResult (Executor / Explorer)"] --> ValWorker["Validator Worker (Deterministic Authority)"]
+    
+    subgraph Checks ["7 Independent Deterministic Verification Checks"]
+        C1["1. Injection & Untrusted Content Defense (PROMPT_INJECTION)"]
+        C2["2. Source URL & Domain Authorization (SSRF / BLOCKED / UNSAFE_URL)"]
+        C3["3. Schema & Required Fields (SCHEMA_ERROR)"]
+        C4["4. Product Identity & Spec Tokens (MISMATCH / NEEDS_REVIEW)"]
+        C5["5. Price Sanity & Semantic Type (EMI / MRP / PRICE_ERROR)"]
+        C6["6. Execution Freshness & Anti-Cache (STALE_DATA)"]
+        C7["7. Step Postconditions & Provenance (BINDING_FAILED)"]
+    end
+    
+    ValWorker --> Checks
+    Checks --> StatusResolution{"Status Resolution"}
+    
+    StatusResolution -->|"All 7 Checks Passed"| PassState["PASS (verifiedOutput populated)"]
+    StatusResolution -->|"Ambiguous Spec / Accessory"| ReviewState["NEEDS_REVIEW (Manual Review / Diagnostics)"]
+    StatusResolution -->|"Unauthorized Domain / Cloudflare Challenge"| BlockedState["BLOCKED"]
+    StatusResolution -->|"Injection / Schema / Stale / EMI / Mismatch"| FailState["FAIL (verifiedOutput empty)"]
+    
+    CritiqueModel["Critique Model (Optional LLM)"] -.->|"Enriches diagnostics ONLY (cannot override FAIL)"| ValWorker
+```
+
+### 5.1 The 7 Deterministic Checks
+
+1. **PROVENANCE_AND_INJECTION_DEFENSE (`CRITICAL`):**
+   - Untrusted website content defense: scans all extracted fields for prompt injection attempts (`ignore previous instructions`, `system override`, `mark status pass`, `<script>`, etc.).
+   - Failure: `PROMPT_INJECTION`.
+2. **SOURCE_URL_VALIDATION (`CRITICAL`):**
+   - Protocol must be HTTPS (HTTP permitted only in test mode on localhost/127.0.0.1).
+   - Domain must match `ALLOWED_TARGET_DOMAINS` or the active SiteAdapter domain.
+   - SSRF protection: blocks private IP ranges (`127.*`, `10.*`, `192.168.*`, `169.254.*`).
+   - Canonical path validation: destination URL must be a specific listing or product path, not the bare root homepage (`/`).
+   - Failure: `BLOCKED` (foreign domain) or `UNSAFE_URL` (insecure scheme / empty path).
+3. **SCHEMA_VALIDATION (`CRITICAL`):**
+   - Enforces non-empty values for `title`, `numericPrice`/`price`, `currency`, `productUrl`, and `retrievalTime`.
+   - Failure: `SCHEMA_ERROR`.
+4. **PRODUCT_IDENTITY (`HIGH`):**
+   - Spec / Model Token Matching: detects RAM/storage specs (`8GB` vs `4GB`), board revisions (`R3` vs `R2`), and tiers (`Pro` vs `Lite`). Conflicting specs flag `isWrongVariant: true`.
+   - Accessory Exclusions: rejects cables, straps, cases, and shields when the user requested a primary device (`isAccessory: true`).
+   - Token Coverage: coverage $< 35\%$ flags complete mismatch; coverage between $35\%$ and $65\%$ flags ambiguous match (`isAmbiguous: true`).
+   - Outcome: Complete mismatch $\to$ `FAIL`; Variant mismatch, accessory, or ambiguous $\to$ `NEEDS_REVIEW`.
+5. **PRICE_VALIDATION (`HIGH`):**
+   - Positive numeric parsing with sanity bounds ($0 < \text{numericPrice} \le 100,000,000$).
+   - Explicit recognized currency symbol or code (`INR`, `₹`, `USD`, `$`, `GBP`, `£`, `EUR`, `€`).
+   - Semantic Price Type Verification: strictly rejects EMI installment prices (e.g. `₹249/mo`, `priceType: "EMI"`) and strikethrough original MRPs.
+   - Card-to-Canonical Price Consistency: verifies that listing card price and canonical product page price do not exhibit bait-and-switch discrepancy ($> 5\%$).
+   - Failure: `PRICE_ERROR`.
+6. **FRESHNESS_VERIFICATION (`HIGH`):**
+   - Validates ISO-8601 execution timestamp (must not be $> 24$ hours old or $> 2$ minutes into future).
+   - Anti-Cache Detection: verifies `retrievalTime` does not reuse the teach run timestamp (`teachRunTimestamp`), preventing cached answers from masquerading as live facts.
+   - Failure: `STALE_DATA`.
+7. **STEP_POSTCONDITIONS (`HIGH`):**
+   - Asserts that all 5 steps (`OPEN`, `SEARCH`, `PARSE`, `SELECT`, `CONFIRM`) completed and contain explicit `observedEvidence` strings.
+   - Verifies `evidenceReferences` contains valid navigation URLs from the active run.
+   - Failure: `BINDING_FAILED`.
+
+### 5.2 Deterministic Authority & Critique Models
+Model critique diagnostics may accompany the validation output in `modelCritiqueSupplements` to explain site changes or suggest recovery actions. However, **critique models have zero authority to overturn deterministic check failures**. If any deterministic assertion fails, the status remains `FAIL`, `NEEDS_REVIEW`, or `BLOCKED`. Only a `PASS` status populates `verifiedOutput`.
+
+### 5.3 Silent-Wrong Metric
+A result is defined as **silent-wrong** if and only if:
+$$\text{silent-wrong} \iff (\text{status} == \text{"PASS"} \land \text{isIncorrectAgainstGroundTruth})$$
+
+The adversarial test suite evaluates 11 distinct adversarial fixtures:
+1. Wrong Product (Arduino $\to$ Raspberry Pi)
+2. Wrong Variant (8GB $\to$ 4GB RAM)
+3. Accessory Item (Smart Watch $\to$ Silicone Strap)
+4. EMI Pricing (₹149/mo installment)
+5. Stale Cached Timestamp (Reused teach run date)
+6. Broken Source URL (`javascript:alert(1)`)
+7. Foreign Domain / SSRF (Unauthorized external destination)
+8. Empty / Missing Schema
+9. Prompt Injection Attempt ("Ignore previous instructions")
+10. Incomplete Evidence (Missing DOM evidence references)
+11. Price Inconsistency (Card ₹499 vs Page ₹1499)
+
+Across all 11 adversarial cases, the target and measured metric is strictly:
+$$\text{silentWrongCount} = 0$$
+
+

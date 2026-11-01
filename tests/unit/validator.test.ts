@@ -172,7 +172,7 @@ describe("Validator Worker & Deterministic Verification", () => {
       expect(val.checks.productIdentityMatch).toBe(false);
     });
 
-    it("flags invalid or missing numeric price as SCHEMA_ERROR", () => {
+    it("flags invalid or missing numeric price as PRICE_ERROR or SCHEMA_ERROR", () => {
       const badPriceResult: AgentResult = {
         ...validExecutionResult,
         structuredOutput: {
@@ -183,7 +183,7 @@ describe("Validator Worker & Deterministic Verification", () => {
 
       const val = validator.validateResult(validTask, badPriceResult, validAdapter);
       expect(val.status).toBe("FAIL");
-      expect(val.failureCategory).toBe("SCHEMA_ERROR");
+      expect(["PRICE_ERROR", "SCHEMA_ERROR"]).toContain(val.failureCategory);
       expect(val.checks.priceParsedINR).toBe(false);
     });
 

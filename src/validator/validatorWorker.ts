@@ -9,14 +9,114 @@ import {
   type ValidationResult,
   type ValidationStatus,
   type FailureCategory,
+  type IndividualCheckResult,
 } from "../types/domain.js";
-import { IdentityChecker } from "./identityCheck.js";
+import { IdentityChecker, type IdentityMatchResult } from "./identityCheck.js";
 import { PostconditionEvaluator } from "./postconditions.js";
 import { logger } from "../utils/logger.js";
 
 export interface CritiqueDiagnostic {
   summary: string;
   recommendedAction?: string;
+}
+
+export interface ValidateOptions {
+  critiqueModelDiagnostic?: CritiqueDiagnostic;
+  teachRunTimestamp?: string;
+  groundTruth?: GroundTruthRecord;
+  requireStepEvidence?: boolean;
+}
+
+export interface GroundTruthRecord {
+  expectedProduct?: string;
+  expectedVariant?: string;
+  isAccessory?: boolean;
+  minPrice?: number;
+  maxPrice?: number;
+  expectedCurrency?: string;
+  allowedDomain?: string;
+  isAdversarial?: boolean; // When true, the fixture is an invalid adversarial case that must never be marked PASS
+  expectedStatus?: ValidationStatus;
+}
+
+/**
+ * Computes whether a validation result is "silent-wrong".
+ * A result is silent-wrong if it was marked PASS by the validator but is incorrect
+ * or invalid against fixture ground truth.
+ */
+export function evaluateSilentWrong(
+  validationResult: ValidationResult,
+  groundTruth: GroundTruthRecord
+): {
+  isSilentWrong: boolean;
+  reason?: string;
+} {
+  // If the validator rejected or flagged the result, it is not silent-wrong
+  if (validationResult.status !== "PASS") {
+    return { isSilentWrong: false };
+  }
+
+  // If status is PASS but the fixture is adversarial / expected to fail
+  if (groundTruth.isAdversarial) {
+    return {
+      isSilentWrong: true,
+      reason: "Adversarial fixture was mistakenly marked PASS by validator.",
+    };
+  }
+
+  if (groundTruth.expectedStatus && groundTruth.expectedStatus !== "PASS") {
+    return {
+      isSilentWrong: true,
+      reason: `Fixture expected status '${groundTruth.expectedStatus}', but was marked PASS.`,
+    };
+  }
+
+  const output = (validationResult.verifiedOutput || {}) as Record<string, unknown>;
+
+  // Check product title against expected product
+  if (groundTruth.expectedProduct && typeof output.title === "string") {
+    const titleLower = output.title.toLowerCase();
+    const expLower = groundTruth.expectedProduct.toLowerCase();
+    if (!titleLower.includes(expLower)) {
+      return {
+        isSilentWrong: true,
+        reason: `Product title '${output.title}' does not match expected ground truth product '${groundTruth.expectedProduct}'.`,
+      };
+    }
+  }
+
+  // Check variant
+  if (groundTruth.expectedVariant && typeof output.title === "string") {
+    const titleLower = output.title.toLowerCase();
+    const varLower = groundTruth.expectedVariant.toLowerCase();
+    if (!titleLower.includes(varLower)) {
+      return {
+        isSilentWrong: true,
+        reason: `Product title '${output.title}' lacks expected variant '${groundTruth.expectedVariant}'.`,
+      };
+    }
+  }
+
+  // Check price bounds
+  if (groundTruth.minPrice !== undefined && typeof output.numericPrice === "number") {
+    if (output.numericPrice < groundTruth.minPrice) {
+      return {
+        isSilentWrong: true,
+        reason: `Numeric price ${output.numericPrice} is below ground truth minimum ${groundTruth.minPrice}.`,
+      };
+    }
+  }
+
+  if (groundTruth.maxPrice !== undefined && typeof output.numericPrice === "number") {
+    if (output.numericPrice > groundTruth.maxPrice) {
+      return {
+        isSilentWrong: true,
+        reason: `Numeric price ${output.numericPrice} exceeds ground truth maximum ${groundTruth.maxPrice}.`,
+      };
+    }
+  }
+
+  return { isSilentWrong: false };
 }
 
 export class ValidatorWorker {
@@ -35,8 +135,26 @@ export class ValidatorWorker {
     task: AgentTask,
     result: AgentResult,
     adapter: SiteAdapter,
-    critiqueModelDiagnostic?: CritiqueDiagnostic
+    critiqueOrOptions?: CritiqueDiagnostic | ValidateOptions
   ): ValidationResult {
+    // Normalize options
+    let critiqueModelDiagnostic: CritiqueDiagnostic | undefined;
+    let teachRunTimestamp: string | undefined;
+
+    if (critiqueOrOptions) {
+      if ("summary" in critiqueOrOptions && typeof critiqueOrOptions.summary === "string") {
+        critiqueModelDiagnostic = critiqueOrOptions as CritiqueDiagnostic;
+      } else {
+        const opts = critiqueOrOptions as ValidateOptions;
+        critiqueModelDiagnostic = opts.critiqueModelDiagnostic;
+        teachRunTimestamp = opts.teachRunTimestamp;
+      }
+    }
+
+    if (!teachRunTimestamp && task.inputPayload?.teachRunTimestamp) {
+      teachRunTimestamp = String(task.inputPayload.teachRunTimestamp);
+    }
+
     const query = (task.inputPayload?.query as string) || task.goal;
     const output = (result.structuredOutput || {}) as Record<string, unknown>;
 
@@ -47,46 +165,146 @@ export class ValidatorWorker {
       resultStatus: result.status,
     });
 
-    // 1. Domain Authorization & SSRF Check
-    const domainAuthorized = this.checkDomainAuthorization(adapter.domain, result);
+    const detailedChecks: IndividualCheckResult[] = [];
 
-    // 2. Schema Validation Check
-    const schemaValid = this.checkSchemaValid(result);
+    // ------------------------------------------------------------------------
+    // 1. Prompt Injection & Adversarial Content Detection
+    // ------------------------------------------------------------------------
+    const injectionCheck = this.checkPromptInjection(output);
+    detailedChecks.push({
+      checkName: "PROVENANCE_AND_INJECTION_DEFENSE",
+      passed: !injectionCheck.detected,
+      severity: "CRITICAL",
+      observedEvidence: injectionCheck.observedEvidence,
+      expected: "Extracted fields must be free of prompt injection instructions",
+      diagnostic: injectionCheck.diagnostic,
+    });
 
-    // 3. Product Identity Match Check
+    // ------------------------------------------------------------------------
+    // 2. Source URL & Domain Authorization Check
+    // ------------------------------------------------------------------------
+    const domainCheck = this.checkDomainAuthorization(adapter.domain, result, output);
+    detailedChecks.push({
+      checkName: "SOURCE_URL_VALIDATION",
+      passed: domainCheck.authorized && domainCheck.urlSafe,
+      severity: "CRITICAL",
+      observedEvidence: domainCheck.observedEvidence,
+      expected: `Secure HTTPS navigation within authorized target domain '${adapter.domain}'`,
+      diagnostic: domainCheck.diagnostic,
+    });
+
+    // ------------------------------------------------------------------------
+    // 3. Schema & Required Fields Check
+    // ------------------------------------------------------------------------
+    const schemaCheck = this.checkSchemaValid(result);
+    detailedChecks.push({
+      checkName: "SCHEMA_VALIDATION",
+      passed: schemaCheck.valid,
+      severity: "CRITICAL",
+      observedEvidence: schemaCheck.observedEvidence,
+      expected: "Mandatory fields: title, numericPrice/price, currency, productUrl, retrievedAt",
+      diagnostic: schemaCheck.diagnostic,
+    });
+
+    // ------------------------------------------------------------------------
+    // 4. Product Identity & Spec Token Matching Check
+    // ------------------------------------------------------------------------
     const title = typeof output.title === "string" ? output.title : "";
     const identityResult = IdentityChecker.verify(query, title);
-    const productIdentityMatch = identityResult.match;
+    const identityPassed = identityResult.match;
 
-    // 4. Price Parsing & Currency Check
-    const priceParsedINR = this.checkPriceValid(output);
+    detailedChecks.push({
+      checkName: "PRODUCT_IDENTITY",
+      passed: identityPassed,
+      severity: "HIGH",
+      observedEvidence: `Extracted title: '${title || "none"}' (coverage: ${(identityResult.score * 100).toFixed(0)}%)`,
+      expected: `Product matching query '${query}' without accessory or spec conflict`,
+      diagnostic: identityResult.reason,
+    });
 
-    // 5. Freshness Timestamp Check
-    const freshnessValid = this.checkFreshness(output);
+    // ------------------------------------------------------------------------
+    // 5. Price Verification & Semantic Price Type Check
+    // ------------------------------------------------------------------------
+    const priceCheck = this.checkPriceValid(output);
+    detailedChecks.push({
+      checkName: "PRICE_VALIDATION",
+      passed: priceCheck.valid,
+      severity: "HIGH",
+      observedEvidence: priceCheck.observedEvidence,
+      expected: "Positive purchase price in valid currency; not an EMI installment or original MRP",
+      diagnostic: priceCheck.diagnostic,
+    });
 
-    // 6. Step Postconditions
+    // ------------------------------------------------------------------------
+    // 6. Freshness & Stale Data Check
+    // ------------------------------------------------------------------------
+    const freshnessCheck = this.checkFreshness(output, teachRunTimestamp);
+    detailedChecks.push({
+      checkName: "FRESHNESS_VERIFICATION",
+      passed: freshnessCheck.valid,
+      severity: "HIGH",
+      observedEvidence: freshnessCheck.observedEvidence,
+      expected: "Live ISO timestamp recorded at execution; strictly distinct from teach run",
+      diagnostic: freshnessCheck.diagnostic,
+    });
+
+    // ------------------------------------------------------------------------
+    // 7. Step Postconditions & Provenance Check
+    // ------------------------------------------------------------------------
     const stepPostconditions = PostconditionEvaluator.evaluateSteps(result, adapter.domain);
     const allStepsPassed = stepPostconditions.every((sp) => sp.passed);
+    const hasEvidence = (result.evidenceReferences && result.evidenceReferences.length > 0) || !!output.productUrl;
 
-    // Compute Overall Status and Failure Category
+    detailedChecks.push({
+      checkName: "STEP_POSTCONDITIONS",
+      passed: allStepsPassed && hasEvidence,
+      severity: "HIGH",
+      observedEvidence: `Steps completed: ${stepPostconditions.filter((s) => s.passed).length}/5; Evidence URLs: ${result.evidenceReferences?.length ?? 0}`,
+      expected: "All 5 steps verified with explicit DOM/navigation evidence",
+      diagnostic: !allStepsPassed
+        ? stepPostconditions.filter((s) => !s.passed).map((s) => s.message).join("; ")
+        : (!hasEvidence ? "Missing execution evidence references" : undefined),
+    });
+
+    // ------------------------------------------------------------------------
+    // Resolve Overall Status & Failure Category with Strict Precedence
+    // ------------------------------------------------------------------------
     let status: ValidationStatus = "PASS";
     let failureCategory: FailureCategory = "NONE";
 
-    if (result.status === "BLOCKED" || !domainAuthorized) {
+    if (injectionCheck.detected) {
+      status = "FAIL";
+      failureCategory = "PROMPT_INJECTION";
+    } else if (result.status === "BLOCKED" || !domainCheck.authorized) {
       status = "BLOCKED";
       failureCategory = "BLOCKED";
+    } else if (!domainCheck.urlSafe) {
+      status = "FAIL";
+      failureCategory = "UNSAFE_URL";
     } else if (result.status === "STUCK" || result.errors.some((e) => e.code === "BINDING_FAILED")) {
       status = "FAIL";
       failureCategory = "BINDING_FAILED";
-    } else if (!schemaValid) {
+    } else if (!schemaCheck.valid) {
       status = "FAIL";
       failureCategory = "SCHEMA_ERROR";
-    } else if (!productIdentityMatch) {
-      status = "NEEDS_REVIEW";
-      failureCategory = "MISMATCH";
-    } else if (!priceParsedINR || !freshnessValid || !allStepsPassed) {
+    } else if (!freshnessCheck.valid) {
       status = "FAIL";
-      failureCategory = !allStepsPassed ? "BINDING_FAILED" : "SCHEMA_ERROR";
+      failureCategory = freshnessCheck.isStaleData ? "STALE_DATA" : "SCHEMA_ERROR";
+    } else if (!priceCheck.valid) {
+      status = "FAIL";
+      failureCategory = "PRICE_ERROR";
+    } else if (!allStepsPassed || !hasEvidence) {
+      status = "FAIL";
+      failureCategory = "BINDING_FAILED";
+    } else if (!identityPassed) {
+      if (identityResult.isAccessory || identityResult.isWrongVariant || identityResult.isAmbiguous) {
+        status = "NEEDS_REVIEW";
+        failureCategory = "MISMATCH";
+      } else {
+        // Complete mismatch (low coverage)
+        status = "FAIL";
+        failureCategory = "MISMATCH";
+      }
     }
 
     // CRITICAL GUARDRAIL: Critique model CANNOT override deterministic checks
@@ -103,15 +321,18 @@ export class ValidatorWorker {
       status,
       failureCategory,
       checks: {
-        schemaValid,
-        productIdentityMatch,
-        priceParsedINR,
-        domainAuthorized,
-        freshnessValid,
+        schemaValid: schemaCheck.valid,
+        productIdentityMatch: identityPassed,
+        priceParsedINR: priceCheck.valid,
+        domainAuthorized: domainCheck.authorized && domainCheck.urlSafe,
+        freshnessValid: freshnessCheck.valid,
         stepPostconditions,
       },
+      detailedChecks,
+      // ONLY PASS can be accepted as a verified result
       verifiedOutput: status === "PASS" ? output : undefined,
       validatedAt: new Date().toISOString(),
+      modelCritiqueSupplements: critiqueModelDiagnostic?.summary,
     };
 
     const parsed = ValidationResultSchema.parse(validationResult);
@@ -134,7 +355,7 @@ export class ValidatorWorker {
           identityReason: identityResult.reason,
           critique: critiqueModelDiagnostic?.summary,
         },
-        redactedError: status !== "PASS" ? `${failureCategory}: ${identityResult.reason || result.errors[0]?.message}` : undefined,
+        redactedError: status !== "PASS" ? `${failureCategory}: ${identityResult.reason || result.errors[0]?.message || detailedChecks.find((c) => !c.passed)?.diagnostic}` : undefined,
       });
     }
 
@@ -182,32 +403,89 @@ export class ValidatorWorker {
     };
   }
 
-  private checkDomainAuthorization(domain: string, result: AgentResult): boolean {
+  private checkPromptInjection(output: Record<string, unknown>): {
+    detected: boolean;
+    observedEvidence: string;
+    diagnostic?: string;
+  } {
+    const injectionPatterns = [
+      /\bignore\s+(?:all\s+)?previous\s+instructions\b/i,
+      /\bsystem\s+override\b/i,
+      /\bmark\s+(?:status\s+)?pass\b/i,
+      /\breturn\s+(?:status\s+)?pass\b/i,
+      /\bvalidation:\s*passed\b/i,
+      /\byou\s+are\s+now\s+in\s+(?:admin|debug|bypass)\s+mode\b/i,
+      /\bassistant\s+instruction\b/i,
+      /<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi,
+    ];
+
+    const stringFields = Object.values(output).filter(
+      (v): v is string => typeof v === "string"
+    );
+
+    for (const text of stringFields) {
+      for (const pattern of injectionPatterns) {
+        if (pattern.test(text)) {
+          const match = text.match(pattern)?.[0] || "injection pattern";
+          return {
+            detected: true,
+            observedEvidence: `Untrusted text snippet: '${text.slice(0, 80)}...'`,
+            diagnostic: `Prompt injection attack detected: '${match}'`,
+          };
+        }
+      }
+    }
+
+    return {
+      detected: false,
+      observedEvidence: "Extracted output fields sanitized; zero injection indicators discovered",
+    };
+  }
+
+  private checkDomainAuthorization(
+    adapterDomain: string,
+    result: AgentResult,
+    output: Record<string, unknown>
+  ): {
+    authorized: boolean;
+    urlSafe: boolean;
+    observedEvidence: string;
+    diagnostic?: string;
+  } {
     const env = getEnv();
     const isTestMode = env.NODE_ENV === "test" || process.env.VITEST === "true";
 
-    if (isTestMode && (domain === "localhost" || domain === "127.0.0.1")) {
-      return true;
-    }
-
+    // 1. Adapter domain check
     const allowed = env.ALLOWED_TARGET_DOMAINS.split(",").map((d) => d.trim().toLowerCase());
-    const isDomainAllowed = allowed.some(
-      (d) => domain.toLowerCase() === d || domain.toLowerCase().endsWith(`.${d}`) || d.includes(domain.toLowerCase())
-    );
+    const isAdapterAllowed =
+      (isTestMode && (adapterDomain === "localhost" || adapterDomain === "127.0.0.1")) ||
+      allowed.some((d) => adapterDomain.toLowerCase() === d || adapterDomain.toLowerCase().endsWith(`.${d}`) || d.includes(adapterDomain.toLowerCase()));
 
-    if (!isDomainAllowed) {
-      return false;
+    if (!isAdapterAllowed) {
+      return {
+        authorized: false,
+        urlSafe: true,
+        observedEvidence: `Domain '${adapterDomain}' not in allowed allowlist`,
+        diagnostic: `Target domain '${adapterDomain}' is unauthorized`,
+      };
     }
 
-    // SSRF Check on evidenceReferences
-    for (const ref of result.evidenceReferences) {
+    // 2. Product URL security check
+    const productUrl = typeof output.productUrl === "string" ? output.productUrl.trim() : "";
+    if (productUrl) {
       try {
-        const url = new URL(ref);
-        if (url.protocol !== "https:" && !(isTestMode && url.protocol === "http:")) {
-          return false;
+        const parsed = new URL(productUrl);
+        const protocol = parsed.protocol;
+        if (protocol !== "https:" && !(isTestMode && protocol === "http:")) {
+          return {
+            authorized: true,
+            urlSafe: false,
+            observedEvidence: `Insecure URL protocol: '${protocol}'`,
+            diagnostic: `Product URL scheme must be HTTPS (received '${protocol}')`,
+          };
         }
-        // Block private IP ranges
-        const hostname = url.hostname;
+
+        const hostname = parsed.hostname.toLowerCase();
         if (
           !isTestMode &&
           (hostname === "localhost" ||
@@ -216,99 +494,299 @@ export class ValidatorWorker {
             hostname.startsWith("192.168.") ||
             hostname.startsWith("169.254."))
         ) {
-          return false;
+          return {
+            authorized: false,
+            urlSafe: false,
+            observedEvidence: `SSRF target attempted: '${hostname}'`,
+            diagnostic: `Private IP / localhost target disallowed in production`,
+          };
         }
-      } catch {
-        return false;
+
+        // Hostname must match allowed domain or adapter domain
+        const isHostAllowed =
+          (isTestMode && (hostname === "localhost" || hostname === "127.0.0.1")) ||
+          hostname === adapterDomain.toLowerCase() ||
+          hostname.endsWith(`.${adapterDomain.toLowerCase()}`) ||
+          allowed.some((d) => hostname === d || hostname.endsWith(`.${d}`));
+
+        if (!isHostAllowed) {
+          return {
+            authorized: false,
+            urlSafe: true,
+            observedEvidence: `Product URL points to foreign domain: '${hostname}'`,
+            diagnostic: `URL destination '${hostname}' does not match allowed domain '${adapterDomain}'`,
+          };
+        }
+
+        // Canonical product path check: must not be empty or root only
+        if (parsed.pathname === "/" || !parsed.pathname) {
+          return {
+            authorized: true,
+            urlSafe: false,
+            observedEvidence: `Product URL path is root homepage ('/')`,
+            diagnostic: "Product URL must point to a canonical listing/product path, not root homepage",
+          };
+        }
+      } catch (err: unknown) {
+        return {
+          authorized: true,
+          urlSafe: false,
+          observedEvidence: `Malformed productUrl: '${productUrl}'`,
+          diagnostic: `Failed to parse productUrl: ${err instanceof Error ? err.message : String(err)}`,
+        };
       }
     }
 
-    return true;
+    // 3. SSRF Check on evidenceReferences
+    for (const ref of result.evidenceReferences || []) {
+      try {
+        const url = new URL(ref);
+        if (url.protocol !== "https:" && !(isTestMode && url.protocol === "http:")) {
+          return {
+            authorized: true,
+            urlSafe: false,
+            observedEvidence: `Insecure reference protocol '${url.protocol}' in evidence`,
+            diagnostic: "Evidence reference must use HTTPS",
+          };
+        }
+        const hostname = url.hostname.toLowerCase();
+        if (
+          !isTestMode &&
+          (hostname === "localhost" ||
+            hostname.startsWith("127.") ||
+            hostname.startsWith("10.") ||
+            hostname.startsWith("192.168.") ||
+            hostname.startsWith("169.254."))
+        ) {
+          return {
+            authorized: false,
+            urlSafe: false,
+            observedEvidence: `SSRF target attempted in evidence: '${hostname}'`,
+            diagnostic: "Private IP reference disallowed in evidence",
+          };
+        }
+      } catch {
+        return {
+          authorized: true,
+          urlSafe: false,
+          observedEvidence: `Invalid evidence URL reference '${ref}'`,
+          diagnostic: "Evidence references must be well-formed URLs",
+        };
+      }
+    }
+
+    return {
+      authorized: true,
+      urlSafe: true,
+      observedEvidence: `Destination '${adapterDomain}' authorized and HTTPS-compliant`,
+    };
   }
 
-  private checkSchemaValid(result: AgentResult): boolean {
+  private checkSchemaValid(result: AgentResult): {
+    valid: boolean;
+    observedEvidence: string;
+    diagnostic?: string;
+  } {
     if (!result.structuredOutput) {
-      return false;
+      return {
+        valid: false,
+        observedEvidence: "Structured output object is null or undefined",
+        diagnostic: "Missing structuredOutput payload",
+      };
     }
 
     const out = result.structuredOutput as Record<string, unknown>;
+    const missing: string[] = [];
 
-    // Must have non-empty title
-    if (typeof out.title !== "string" || !out.title.trim()) {
-      return false;
+    // Title
+    if (typeof out.title !== "string" || out.title.trim().length < 2) {
+      missing.push("title");
     }
 
-    // Must have valid price
+    // Price
     const hasNumeric = typeof out.numericPrice === "number" && !isNaN(out.numericPrice) && out.numericPrice > 0;
     const hasRawPrice = typeof out.price === "string" && out.price.trim().length > 0;
     if (!hasNumeric && !hasRawPrice) {
-      return false;
+      missing.push("numericPrice/price");
     }
 
-    // Must have currency
+    // Currency
     if (typeof out.currency !== "string" || !out.currency.trim()) {
-      return false;
+      missing.push("currency");
     }
 
-    // Must have productUrl
+    // ProductUrl
     if (typeof out.productUrl !== "string" || !out.productUrl.trim()) {
-      return false;
-    }
-    try {
-      new URL(out.productUrl);
-    } catch {
-      return false;
+      missing.push("productUrl");
     }
 
-    return true;
+    // RetrievedAt / RetrievalTime
+    const timeVal = out.retrievalTime || out.retrievedAt || out.timestamp;
+    if (typeof timeVal !== "string" || !timeVal.trim()) {
+      missing.push("retrievalTime");
+    }
+
+    if (missing.length > 0) {
+      return {
+        valid: false,
+        observedEvidence: `Missing required schema fields: ${missing.join(", ")}`,
+        diagnostic: `Incomplete output record: missing ${missing.join(", ")}`,
+      };
+    }
+
+    return {
+      valid: true,
+      observedEvidence: "All required schema fields (title, price, currency, productUrl, retrievalTime) present",
+    };
   }
 
-  private checkPriceValid(output: Record<string, unknown>): boolean {
+  private checkPriceValid(output: Record<string, unknown>): {
+    valid: boolean;
+    observedEvidence: string;
+    diagnostic?: string;
+  } {
+    // 1. Semantic Price Type Check: Rejection of EMI / monthly installment pricing
+    const rawPrice = typeof output.price === "string" ? output.price : "";
+    const priceType = typeof output.priceType === "string" ? output.priceType.toUpperCase() : "";
+    const isEmiFlag = output.isEmi === true;
+
+    const emiRegex = /\b(emi|per\s*month|\/mo|\/month|monthly|installment)\b/i;
+    if (isEmiFlag || priceType === "EMI" || emiRegex.test(rawPrice)) {
+      return {
+        valid: false,
+        observedEvidence: `Raw price '${rawPrice}' indicated EMI/installment`,
+        diagnostic: `Semantic price error: EMI/installment selected as purchase price (${rawPrice})`,
+      };
+    }
+
+    // 2. Rejection of original strikethrough MRP when discount was available
+    if (priceType === "ORIGINAL_MRP" || output.isStrikethrough === true) {
+      return {
+        valid: false,
+        observedEvidence: `Price marked as original MRP/strikethrough (${rawPrice})`,
+        diagnostic: "Selected original strikethrough MRP instead of effective selling price",
+      };
+    }
+
+    // 3. Numeric Amount Parsing & Sanity Bounds
     let numeric = 0;
     if (typeof output.numericPrice === "number") {
       numeric = output.numericPrice;
-    } else if (typeof output.price === "string") {
-      const match = output.price.replace(/,/g, "").match(/\d+(\.\d+)?/);
+    } else if (rawPrice) {
+      const match = rawPrice.replace(/,/g, "").match(/\d+(\.\d+)?/);
       if (match) {
         numeric = parseFloat(match[0]);
       }
     }
 
     if (isNaN(numeric) || numeric <= 0 || numeric > 100_000_000) {
-      return false;
+      return {
+        valid: false,
+        observedEvidence: `Parsed numeric price: ${numeric}`,
+        diagnostic: `Price amount ${numeric} is invalid (must be 0 < amount <= 100,000,000)`,
+      };
     }
 
+    // 4. Currency Verification
     const currency = typeof output.currency === "string" ? output.currency.trim().toUpperCase() : "";
     const knownCurrencies = ["INR", "₹", "RS", "RS.", "GBP", "£", "USD", "$", "EUR", "€"];
     const isKnownCurrency = knownCurrencies.some(
       (c) => currency === c || currency.includes(c)
     );
 
-    return isKnownCurrency;
+    if (!isKnownCurrency) {
+      return {
+        valid: false,
+        observedEvidence: `Unknown currency: '${output.currency}'`,
+        diagnostic: `Currency '${output.currency}' not recognized`,
+      };
+    }
+
+    // 5. Card-to-Canonical Price Consistency (where both are provided)
+    const cardPrice = typeof output.listingPrice === "number" ? output.listingPrice : (typeof output.cardPrice === "number" ? output.cardPrice : undefined);
+    const canonicalPrice = typeof output.canonicalPrice === "number" ? output.canonicalPrice : (typeof output.productPagePrice === "number" ? output.productPagePrice : undefined);
+
+    if (cardPrice !== undefined && canonicalPrice !== undefined && cardPrice > 0) {
+      const priceDiffRatio = Math.abs(cardPrice - canonicalPrice) / cardPrice;
+      if (priceDiffRatio > 0.05) {
+        return {
+          valid: false,
+          observedEvidence: `Card price: ${cardPrice}, Canonical page price: ${canonicalPrice} (diff: ${(priceDiffRatio * 100).toFixed(1)}%)`,
+          diagnostic: `Price inconsistency between listing card (${cardPrice}) and product canonical page (${canonicalPrice})`,
+        };
+      }
+    }
+
+    return {
+      valid: true,
+      observedEvidence: `Price parsed: ${currency}${numeric} (${priceType || "SELLING_PRICE"})`,
+    };
   }
 
-  private checkFreshness(output: Record<string, unknown>): boolean {
+  private checkFreshness(
+    output: Record<string, unknown>,
+    teachRunTimestamp?: string
+  ): {
+    valid: boolean;
+    isStaleData: boolean;
+    observedEvidence: string;
+    diagnostic?: string;
+  } {
     const rawTime = output.retrievalTime || output.retrievedAt || output.timestamp;
     if (typeof rawTime !== "string") {
-      return false;
+      return {
+        valid: false,
+        isStaleData: false,
+        observedEvidence: "Missing timestamp in output",
+        diagnostic: "Output missing retrieval timestamp",
+      };
+    }
+
+    // Stale/reused teach run timestamp check
+    if (teachRunTimestamp && (rawTime === teachRunTimestamp || output.isCached === true || output.source === "TEACH_CACHE")) {
+      return {
+        valid: false,
+        isStaleData: true,
+        observedEvidence: `Timestamp '${rawTime}' matches teach run timestamp '${teachRunTimestamp}'`,
+        diagnostic: `Stale data detected: output reused timestamp from teach run. Current product facts must be re-fetched live at execution time.`,
+      };
     }
 
     const parsed = Date.parse(rawTime);
     if (isNaN(parsed)) {
-      return false;
+      return {
+        valid: false,
+        isStaleData: false,
+        observedEvidence: `Malformed timestamp: '${rawTime}'`,
+        diagnostic: "Timestamp is not a valid ISO-8601 date string",
+      };
     }
 
     const now = Date.now();
-    // Allow up to 2 minutes into future for clock drift
+    // Up to 2 minutes clock drift
     if (parsed > now + 120_000) {
-      return false;
+      return {
+        valid: false,
+        isStaleData: false,
+        observedEvidence: `Timestamp is in the future (${rawTime})`,
+        diagnostic: "Timestamp is in the future",
+      };
     }
 
-    // Should not be older than 24 hours
+    // Max 24 hours old
     if (now - parsed > 24 * 60 * 60 * 1000) {
-      return false;
+      return {
+        valid: false,
+        isStaleData: true,
+        observedEvidence: `Timestamp is older than 24 hours (${rawTime})`,
+        diagnostic: "Data is stale (older than 24 hours)",
+      };
     }
 
-    return true;
+    return {
+      valid: true,
+      isStaleData: false,
+      observedEvidence: `Execution timestamp: ${rawTime} (fresh)`,
+    };
   }
 }

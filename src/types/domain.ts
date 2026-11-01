@@ -234,14 +234,32 @@ export const FailureCategorySchema = z.enum([
   "BLOCKED",
   "MISMATCH",
   "SCHEMA_ERROR",
+  "PRICE_ERROR",
+  "UNSAFE_URL",
+  "STALE_DATA",
+  "PROMPT_INJECTION",
   "TIMEOUT",
 ]);
 export type FailureCategory = z.infer<typeof FailureCategorySchema>;
+
+export const CheckSeveritySchema = z.enum(["CRITICAL", "HIGH", "MEDIUM", "INFO"]);
+export type CheckSeverity = z.infer<typeof CheckSeveritySchema>;
+
+export const IndividualCheckResultSchema = z.object({
+  checkName: z.string(),
+  passed: z.boolean(),
+  severity: CheckSeveritySchema,
+  observedEvidence: z.string(),
+  expected: z.string(),
+  diagnostic: z.string().optional(),
+});
+export type IndividualCheckResult = z.infer<typeof IndividualCheckResultSchema>;
 
 export const StepPostconditionResultSchema = z.object({
   stepName: z.string(),
   passed: z.boolean(),
   message: z.string(),
+  observedEvidence: z.string().optional(),
 });
 export type StepPostconditionResult = z.infer<typeof StepPostconditionResultSchema>;
 
@@ -257,8 +275,10 @@ export const ValidationResultSchema = z.object({
     freshnessValid: z.boolean(),
     stepPostconditions: z.array(StepPostconditionResultSchema),
   }),
+  detailedChecks: z.array(IndividualCheckResultSchema).default([]),
   verifiedOutput: z.record(z.unknown()).optional(),
   validatedAt: z.string().datetime(),
+  modelCritiqueSupplements: z.string().optional(),
 });
 export type ValidationResult = z.infer<typeof ValidationResultSchema>;
 
