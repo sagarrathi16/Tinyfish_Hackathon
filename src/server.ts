@@ -6,6 +6,7 @@ import { getDatabase } from "./persistence/database.js";
 import { Repository } from "./persistence/repository.js";
 import { ShadowTwinOrchestrator } from "./orchestrator/orchestrator.js";
 import { BenchmarkWorker } from "./benchmark/benchmarkWorker.js";
+import { seedCleanDemo } from "./benchmark/demoSeed.js";
 import { MockStoreServer } from "./fixtures/mockStoreServer.js";
 import { logger } from "./utils/logger.js";
 
@@ -264,6 +265,12 @@ export function createServer(repoOverride?: Repository) {
     mockStore.domMutated = false;
     logger.info("Demo storage and fixture state reset to clean baseline");
     res.json({ success: true, message: "Storage reset cleanly" });
+  });
+
+  app.post("/api/demo/seed", (_req: Request, res: Response) => {
+    const seedOutcome = seedCleanDemo(repo, `http://localhost:${env.PORT}`);
+    mockStore.domMutated = false;
+    res.json(seedOutcome);
   });
 
   return app;

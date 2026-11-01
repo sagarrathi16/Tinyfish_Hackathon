@@ -544,6 +544,13 @@ export class MockStoreServer {
     });
 
     // ------------------------------------------------------------------------
+    // Hanging / Slow Route (For Timeout Testing)
+    // ------------------------------------------------------------------------
+    this.app.get("/store-slow-hang", (_req: Request, _res: Response) => {
+      // Deliberately never respond to simulate connection hang / timeout
+    });
+
+    // ------------------------------------------------------------------------
     // DOM Mutation Toggle Endpoint
     // ------------------------------------------------------------------------
     this.app.post("/toggle-dom", (_req: Request, res: Response) => {

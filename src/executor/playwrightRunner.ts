@@ -301,6 +301,7 @@ export class PlaywrightRunner {
         title: topCard.title,
         numericPrice: topCard.numericPrice,
         currency: topCard.currency,
+        url: topCard.url,
         productUrl: topCard.url,
         evidenceUrl: page.url(),
         retrievalTime: new Date().toISOString(),
