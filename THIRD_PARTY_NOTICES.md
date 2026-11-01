@@ -8,11 +8,14 @@ This project incorporates dependencies, APIs, and architectural patterns from th
 
 | Package | Version | License | Source / Repository | Purpose in ShadowTwin |
 | :--- | :--- | :--- | :--- | :--- |
+| **`@tiny-fish/sdk`** | `^0.11.0` | MIT | [github.com/tinyfish-io](https://github.com/tinyfish-io) | Official TinyFish TypeScript client for workflow exploration and recovery |
+| **`playwright`** | `^1.64.1` | Apache-2.0 | [github.com/microsoft/playwright](https://github.com/microsoft/playwright) | Local Chromium execution runtime for deterministic zero-agent replay |
+| **`better-sqlite3`** | `^13.0.3` | MIT | [github.com/WiseLibs/better-sqlite3](https://github.com/WiseLibs/better-sqlite3) | Synchronous, high-performance SQLite engine with WAL concurrency |
 | **`express`** | `^4.21.2` | MIT | [github.com/expressjs/express](https://github.com/expressjs/express) | HTTP server for health endpoints and studio dashboard |
 | **`zod`** | `^3.24.1` | MIT | [github.com/colinhacks/zod](https://github.com/colinhacks/zod) | Typed contracts, agent envelopes, and schema validation |
 | **`dotenv`** | `^16.4.7` | BSD-2-Clause | [github.com/motdotla/dotenv](https://github.com/motdotla/dotenv) | Local environment variable management |
 | **`typescript`** | `^5.7.3` | Apache-2.0 | [github.com/microsoft/TypeScript](https://github.com/microsoft/TypeScript) | Strict static typechecking |
-| **`vitest`** | `^3.0.4` | MIT | [github.com/vitest-dev/vitest](https://github.com/vitest-dev/vitest) | Unit testing suite |
+| **`vitest`** | `^3.0.4` | MIT | [github.com/vitest-dev/vitest](https://github.com/vitest-dev/vitest) | Unit and integration testing suite |
 | **`tsx`** | `^4.19.2` | MIT | [github.com/privatenumber/tsx](https://github.com/privatenumber/tsx) | Fast TypeScript execution runtime |
 
 ---

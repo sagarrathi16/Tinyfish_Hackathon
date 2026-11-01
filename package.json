@@ -13,7 +13,8 @@
     "test:adversarial": "vitest run tests/unit/validatorAdversarial.test.ts",
     "smoke-test": "tsx scripts/smoke-test.ts",
     "live-test": "tsx scripts/live-web-demo.ts",
-    "seed": "tsx scripts/seed-demo.ts"
+    "seed": "tsx scripts/seed-demo.ts",
+    "demo": "tsx scripts/e2e-demo.ts"
   },
   "keywords": [
     "tinyfish",

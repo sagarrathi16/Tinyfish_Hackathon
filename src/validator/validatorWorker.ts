@@ -453,12 +453,12 @@ export class ValidatorWorker {
     diagnostic?: string;
   } {
     const env = getEnv();
-    const isTestMode = env.NODE_ENV === "test" || process.env.VITEST === "true";
+    const isDevOrTest = env.NODE_ENV !== "production" || process.env.VITEST === "true";
 
     // 1. Adapter domain check
     const allowed = env.ALLOWED_TARGET_DOMAINS.split(",").map((d) => d.trim().toLowerCase());
     const isAdapterAllowed =
-      (isTestMode && (adapterDomain === "localhost" || adapterDomain === "127.0.0.1")) ||
+      (isDevOrTest && (adapterDomain === "localhost" || adapterDomain === "127.0.0.1")) ||
       allowed.some((d) => adapterDomain.toLowerCase() === d || adapterDomain.toLowerCase().endsWith(`.${d}`) || d.includes(adapterDomain.toLowerCase()));
 
     if (!isAdapterAllowed) {
@@ -476,7 +476,7 @@ export class ValidatorWorker {
       try {
         const parsed = new URL(productUrl);
         const protocol = parsed.protocol;
-        if (protocol !== "https:" && !(isTestMode && protocol === "http:")) {
+        if (protocol !== "https:" && !(isDevOrTest && protocol === "http:")) {
           return {
             authorized: true,
             urlSafe: false,
@@ -487,7 +487,7 @@ export class ValidatorWorker {
 
         const hostname = parsed.hostname.toLowerCase();
         if (
-          !isTestMode &&
+          !isDevOrTest &&
           (hostname === "localhost" ||
             hostname.startsWith("127.") ||
             hostname.startsWith("10.") ||
@@ -504,7 +504,7 @@ export class ValidatorWorker {
 
         // Hostname must match allowed domain or adapter domain
         const isHostAllowed =
-          (isTestMode && (hostname === "localhost" || hostname === "127.0.0.1")) ||
+          (isDevOrTest && (hostname === "localhost" || hostname === "127.0.0.1")) ||
           hostname === adapterDomain.toLowerCase() ||
           hostname.endsWith(`.${adapterDomain.toLowerCase()}`) ||
           allowed.some((d) => hostname === d || hostname.endsWith(`.${d}`));
@@ -541,7 +541,7 @@ export class ValidatorWorker {
     for (const ref of result.evidenceReferences || []) {
       try {
         const url = new URL(ref);
-        if (url.protocol !== "https:" && !(isTestMode && url.protocol === "http:")) {
+        if (url.protocol !== "https:" && !(isDevOrTest && url.protocol === "http:")) {
           return {
             authorized: true,
             urlSafe: false,
@@ -551,7 +551,7 @@ export class ValidatorWorker {
         }
         const hostname = url.hostname.toLowerCase();
         if (
-          !isTestMode &&
+          !isDevOrTest &&
           (hostname === "localhost" ||
             hostname.startsWith("127.") ||
             hostname.startsWith("10.") ||

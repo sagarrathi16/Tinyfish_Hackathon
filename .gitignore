@@ -49,3 +49,7 @@ yarn-error.log*
 .DS_Store
 Thumbs.db
 
+# Agent skills cache
+.agents/
+skills-lock.json
+
