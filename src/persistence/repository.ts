@@ -373,6 +373,43 @@ export class Repository {
     return ValidationResultSchema.parse(JSON.parse(row.data_json));
   }
 
+  getLatestValidation(): ValidationResult | null {
+    const stmt = this.db.prepare(`
+      SELECT data_json FROM validation_records ORDER BY validated_at DESC LIMIT 1
+    `);
+    const row = stmt.get() as { data_json: string } | undefined;
+    if (!row) return null;
+    return ValidationResultSchema.parse(JSON.parse(row.data_json));
+  }
+
+  getLatestTrace(traceType?: string): TraceRecord | null {
+    let query = `SELECT trace_id, job_id, run_id, trace_type, data_json, created_at FROM traces`;
+    if (traceType) {
+      query += ` WHERE trace_type = ?`;
+    }
+    query += ` ORDER BY created_at DESC LIMIT 1`;
+    const stmt = this.db.prepare(query);
+    const row = (traceType ? stmt.get(traceType) : stmt.get()) as
+      | {
+          trace_id: string;
+          job_id: string;
+          run_id: string;
+          trace_type: string;
+          data_json: string;
+          created_at: string;
+        }
+      | undefined;
+    if (!row) return null;
+    return TraceRecordSchema.parse({
+      traceId: row.trace_id,
+      jobId: row.job_id,
+      runId: row.run_id,
+      traceType: row.trace_type,
+      data: JSON.parse(row.data_json),
+      createdAt: row.created_at,
+    });
+  }
+
   // ==========================================================================
   // Benchmark Records
   // ==========================================================================

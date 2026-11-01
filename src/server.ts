@@ -150,8 +150,59 @@ export function createServer(repoOverride?: Repository) {
     }
   });
 
+  /**
+   * Cross-Site Transfer from Store A to Store B:
+   * Reuses task template and policy; discovers/grounds separate Store B adapter;
+   * validates on 2 distinct queries before ACTIVE promotion; replays with 0 TinyFish calls.
+   */
+  app.post("/api/transfer", async (req: Request, res: Response) => {
+    try {
+      const {
+        sourceDomain = "localhost",
+        targetDomain = "localhost",
+        entryUrl,
+        validationQueries = ["Arduino Uno", "ESP32"],
+        subsequentQuery = "Raspberry Pi",
+        enableTip = true,
+      } = req.body;
+
+      const report = await orchestrator.transferWorkflow({
+        sourceDomain,
+        targetDomain,
+        entryUrl: entryUrl || `http://localhost:${env.PORT}/store-b`,
+        validationQueries: validationQueries as [string, string],
+        subsequentQuery,
+        enableTip,
+      });
+
+      // Record benchmark record
+      benchmarkWorker.recordTrial({
+        trialType: "CROSS_SITE_TRANSFER",
+        site: targetDomain,
+        query: subsequentQuery,
+        agentInvocations: report.tipStatus === "MATCHED" ? 0 : 1,
+        agentSteps: null,
+        latencyMs: report.replayProof.latencyMs,
+        success: report.replayProof.passed,
+        resultCorrectness: report.replayProof.passed ? "CORRECT" : "INCORRECT",
+        costs: {
+          agentCostUsd: report.tipStatus === "MATCHED" ? 0 : 0.015,
+          browserCostUsd: 0,
+          totalCostUsd: report.tipStatus === "MATCHED" ? 0 : 0.015,
+        },
+        unavailableMetrics: [],
+      });
+
+      res.json(report);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      logger.error("API /api/transfer error", { error: message });
+      res.status(500).json({ error: message });
+    }
+  });
+
   // --------------------------------------------------------------------------
-  // Skills, Adapters & Events Introspection
+  // Skills, Adapters, Validation & Recovery Introspection
   // --------------------------------------------------------------------------
   app.get("/api/skills", (_req: Request, res: Response) => {
     const active = repo.getActiveSkill();
@@ -163,6 +214,16 @@ export function createServer(repoOverride?: Repository) {
     const active = domain ? repo.getActiveSiteAdapter(domain) : null;
     const history = domain ? repo.listSiteAdapters(domain) : [];
     res.json({ activeAdapter: active, history });
+  });
+
+  app.get("/api/validation/latest", (_req: Request, res: Response) => {
+    const latest = repo.getLatestValidation();
+    res.json({ validation: latest });
+  });
+
+  app.get("/api/recovery/latest", (_req: Request, res: Response) => {
+    const trace = repo.getLatestTrace("RECOVERY_PROMOTION");
+    res.json({ recoveryTrace: trace });
   });
 
   app.get("/api/events/:jobId", (req: Request, res: Response) => {

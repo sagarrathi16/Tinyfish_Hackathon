@@ -180,4 +180,38 @@ describe("API Server Endpoints & Studio Telemetry", () => {
     const data = await res.json();
     expect(data.success).toBe(true);
   });
+
+  it("serves ShadowTwin Studio HTML with all 8 required panels", async () => {
+    const res = await fetch(`${baseUrl}/index.html`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("text/html");
+    const html = await res.text();
+
+    // Verify all 8 required judge-readable panels exist
+    expect(html).toContain("ShadowTwin Studio");
+    expect(html).toContain("1. Task Input");
+    expect(html).toContain("Strict 12-State FSM");
+    expect(html).toContain("3. Live Run Evidence");
+    expect(html).toContain("4. Skill & Site Adapter Inspector");
+    expect(html).toContain("5. Validator Worker (Deterministic Authority)");
+    expect(html).toContain("6. Recovery Diff & Promotion Gate");
+    expect(html).toContain("7. Measured Telemetry (M1–M7 Real Data)");
+    expect(html).toContain("8. Interactive Demonstration Controls");
+
+    // Verify read-only notice & keyboard accessible elements
+    expect(html).toContain("Live 3rd-Party Actions Are Read-Only");
+    expect(html).toContain("aria-label");
+  });
+
+  it("serves latest validation and recovery endpoints", async () => {
+    const valRes = await fetch(`${baseUrl}/api/validation/latest`);
+    expect(valRes.status).toBe(200);
+    const valData = await valRes.json();
+    expect(valData).toHaveProperty("validation");
+
+    const recRes = await fetch(`${baseUrl}/api/recovery/latest`);
+    expect(recRes.status).toBe(200);
+    const recData = await recRes.json();
+    expect(recData).toHaveProperty("recoveryTrace");
+  });
 });

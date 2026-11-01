@@ -40,7 +40,7 @@ flowchart LR
 ```
 
 ### Beat 1: Workflow Induction & Compilation (0:00 – 0:45)
-- **Presenter action:** Click **`1. Teach Store A`** on the dashboard.
+- **Presenter action:** Select `localhost:3000/store-a` and click **`1. Teach Storefront`** in Panel 8.
 - **What is happening:**
   1. The deterministic Orchestrator transitions `READY → TEACHING`.
   2. The Explorer Agent invokes TinyFish Agent to discover product structures, extract candidate bindings, and explain anchor evidence.
@@ -51,34 +51,36 @@ flowchart LR
   > *"Running LLM agents from scratch on every repeat search is slow, fragile, and burns expensive tokens. In ShadowTwin, TinyFish is our workflow compiler. Watch: we ask TinyFish to explore Store A once. It discovers the page layout, extracts stable DOM anchors, and compiles a reusable, versioned skill. Before that skill is ever trusted, our independent Validator tests it against two distinct queries. Only then is it promoted to ACTIVE."*
 
 ### Beat 2: Deterministic Fast Replay — Strictly Zero Agent Calls (0:45 – 1:15)
-- **Presenter action:** Click **`2. Replay (0 Agent Calls)`**.
+- **Presenter action:** Click **`2. Warm Replay (0 Calls)`**.
 - **What is happening:**
   1. Orchestrator transitions `ACTIVE → EXECUTING`.
   2. Local Playwright Chromium replays the 5 approved bindings with no TinyFish Agent calls (`providerRunIds.tinyFishRunId: undefined`).
-  3. Executes in **~1.2 seconds** (12x faster than cold exploration).
+  3. Executes in **~1.2 seconds** (12.5x faster than cold exploration).
   4. Price Parser isolates sale price from strikethrough MRP.
   5. Validator Worker verifies postconditions: transitions `EXECUTING → DONE`.
 - **Spoken script:**
   > *"Now that the workflow is compiled, notice what happens on subsequent searches: local Playwright replays the approved bindings in 1.2 seconds. Zero TinyFish API calls. Zero token costs. And our Price Parser deterministically separates the sale price from strikethrough MRP."*
 
 ### Beat 3: Live Cross-Site Transfer to Store B (1:15 – 1:40)
-- **Presenter action:** Show Store B (`books.toscrape.com`) with separate adapter.
+- **Presenter action:** Click **`5. Cross-Site Transfer`**.
 - **What is happening:**
-  1. Cross-site transfer maintains independent, unmerged adapters per domain.
-  2. Adapters never share or contaminate selectors across domains.
+  1. The Cross-Site Transfer Engine reuses the 5-step task template, output contract, and selection policy 100%.
+  2. Relearns a distinct, domain-isolated adapter for Store B (`electronicscomp.com` fixture) via the TIP structural matcher / Explorer without copying Store A selectors.
+  3. Validates Store B adapter on two distinct queries before atomic promotion.
+  4. Replays a subsequent search on Store B with strictly **zero TinyFish API calls**.
 - **Spoken script:**
-  > *"When we point ShadowTwin at a completely different website, it doesn't try to force Store A's selectors onto Store B. It compiles a dedicated, domain-isolated adapter while reusing the universal 5-step task template."*
+  > *"When we point ShadowTwin at a structurally different website, it doesn't try to force Store A's selectors onto Store B. It compiles a dedicated, domain-isolated adapter while reusing the universal 5-step task template. Replays on Store B also run with strictly zero agent calls."*
 
-### Beat 4: On-Stage DOM Breakage (1:40 – 2:05)
-- **Presenter action:** Click the red button: **`4. ⚡ Mutate Fixture DOM`**.
+### Beat 4: On-Stage DOM Breakage (1:40 – 2:00)
+- **Presenter action:** Click the red button: **`3. ⚡ Mutate Fixture DOM`**.
 - **What is happening:**
   1. The owned mock storefront layout changes dynamically (card containers mutate class).
   2. Dashboard badge updates: `Fixture: MUTATED (Broken DOM)`.
 - **Spoken script:**
   > *"In the real world, e-commerce sites change their layouts overnight. Let's deliberately break this storefront on stage. We've mutated the DOM layout. Traditional scrapers silently crash or return blank hallucinated data."*
 
-### Beat 5: Detection, Autonomous Self-Healing & Promotion Gate (2:05 – 2:35)
-- **Presenter action:** Click **`5. Autonomous Heal`**.
+### Beat 5: Detection, Autonomous Self-Healing & Promotion Gate (2:00 – 2:35)
+- **Presenter action:** Click **`4. Auto Self-Heal`**.
 - **What is happening:**
   1. Playwright runner attempts replay on the mutated page and immediately catches `STUCK / BINDING_FAILED`.
   2. The deterministic Validator refuses a silent wrong answer.
@@ -87,13 +89,14 @@ flowchart LR
   5. TinyFish inspects the live mutated DOM, identifies the updated selector, and synthesizes candidate adapter v1.1.0 (`status: "CANDIDATE"`).
   6. The 2-Query Validation Gate tests candidate v1.1.0 against two distinct queries.
   7. Upon passing both, candidate v1.1.0 is promoted to `ACTIVE`, and the original query succeeds deterministically!
+  8. Panel 6 displays the before-and-after locator diff (`.product-grid-item` → `.mutated-card-node`).
 - **Spoken script:**
-  > *"Look at the live event stream: our Validator caught the breakage and refused a silent wrong answer. It flagged STUCK, invoked TinyFish Recovery Agent to diagnose the page, synthesized candidate adapter v1.1.0, proved it across two independent test queries, and promoted v1.1.0 to active. The system healed itself autonomously."*
+  > *"Look at the live event stream: our Validator caught the breakage and refused a silent wrong answer. It flagged STUCK, invoked TinyFish Recovery Agent to diagnose the page, synthesized candidate adapter v1.1.0, proved it across two independent test queries, and promoted v1.1.0 to active. Look at Panel 6: you can inspect the exact before-and-after locator diff and validation gate."*
 
 ### Beat 6: Measured M1–M7 Telemetry & Enterprise Takeaway (2:35 – 3:00)
-- **Presenter action:** Highlight the **Measured Telemetry** card and M1–M7 table on the Studio dashboard.
+- **Presenter action:** Highlight **Panel 7: Measured Telemetry** and the M1–M7 table on the Studio dashboard.
 - **Spoken script:**
-  > *"Here are the measured numbers: 12.5x faster replay latency, 100% API cost reduction on repeat searches, and strictly zero silent-wrong results. TinyFish transitions from an expensive repetitive browser into a high-leverage workflow compiler and autonomous self-healing supervisor."*
+  > *"Here are the measured numbers from our SQLite repository: 12.5x faster replay latency, 100% API cost reduction on repeat searches, and strictly zero silent-wrong results. TinyFish transitions from an expensive repetitive browser into a high-leverage workflow compiler and autonomous self-healing supervisor."*
 
 ---
 

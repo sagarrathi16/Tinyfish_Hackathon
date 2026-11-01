@@ -274,3 +274,4 @@ describe("TIP Structural Matcher (Task Invariant Pattern)", () => {
     expect(res.explanation).toContain("disabled by feature flag");
   });
 });
+
