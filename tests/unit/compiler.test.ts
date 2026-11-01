@@ -288,3 +288,4 @@ describe("Compiler Agent & Skill/Adapter Compilation", () => {
     expect(storedB?.locatorBindings["PRODUCT_CARD"]?.locatorValue).toBe("article.product_pod");
   });
 });
+
