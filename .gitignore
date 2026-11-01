@@ -36,6 +36,7 @@ data/*.db-shm
 traces/
 recordings/
 screenshots/
+!docs/screenshots/
 .playwright/
 browser-profiles/
 

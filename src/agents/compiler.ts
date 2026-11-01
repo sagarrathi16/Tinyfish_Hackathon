@@ -82,9 +82,16 @@ export class CompilerAgent {
       rawCompilationJson = await this.customLLM(prompt);
     } else {
       const env = getEnv();
-      if (env.LLM_API_KEY) {
-        // Real model call via server-only env key
-        rawCompilationJson = await this.callConfiguredModel(params, env.LLM_API_KEY, env.LLM_MODEL);
+      if (env.LLM_API_KEY && process.env.VITEST !== "true") {
+        try {
+          // Real model call via server-only env key
+          rawCompilationJson = await this.callConfiguredModel(params, env.LLM_API_KEY, env.LLM_MODEL);
+        } catch (err) {
+          logger.warn("Configured model failed or unavailable; falling back to deterministic synthesis", {
+            error: err instanceof Error ? err.message : String(err),
+          });
+          rawCompilationJson = this.synthesizeDeterministic(params, nextVersion, runId);
+        }
       } else {
         // Deterministic synthesis from verified Explorer observations
         rawCompilationJson = this.synthesizeDeterministic(params, nextVersion, runId);

@@ -21,9 +21,20 @@ import { getDatabase } from "./database.js";
 
 export class Repository {
   private db: Database;
+  private eventListeners: Array<(event: RunEvent) => void> = [];
 
   constructor(customDb?: Database) {
     this.db = customDb ?? getDatabase();
+  }
+
+  /**
+   * Subscribes to live run events for real-time SSE streaming.
+   */
+  onEvent(listener: (event: RunEvent) => void): () => void {
+    this.eventListeners.push(listener);
+    return () => {
+      this.eventListeners = this.eventListeners.filter((l) => l !== listener);
+    };
   }
 
   // ==========================================================================
@@ -252,6 +263,15 @@ export class Repository {
       validated.timestamp,
       JSON.stringify(validated)
     );
+
+    // Notify registered event listeners (e.g. SSE clients)
+    for (const listener of this.eventListeners) {
+      try {
+        listener(validated);
+      } catch {
+        // Safe emission
+      }
+    }
   }
 
   getEventsByJob(jobId: string): RunEvent[] {

@@ -124,3 +124,4 @@ During the adversarial review, 5 defects were identified, forensically debugged,
 1. **Third-Party Rate Limits & Cloudflare Turnstile:** While ShadowTwin safely halts with `BLOCKED` when hitting bot mitigation or HTTP 403, live third-party sites can change access controls dynamically.
 2. **Dynamic Live Web DOM Changes:** Live web exploration requires an active, funded `TINYFISH_API_KEY`.
 3. **Statistical Sample Size Disclosure:** Controlled benchmark trials reflect $N=8$ frozen query tasks on mock storefronts. Replay latency on live sites will reflect public network and CDN response times.
+

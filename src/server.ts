@@ -238,6 +238,48 @@ export function createServer(repoOverride?: Repository) {
     res.json({ events });
   });
 
+  // Server-Sent Events (SSE) stream for real-time agent topology and event updates
+  const sseClients = new Set<Response>();
+  repo.onEvent((event) => {
+    const payload = `data: ${JSON.stringify(event)}\n\n`;
+    for (const client of sseClients) {
+      try {
+        client.write(payload);
+      } catch {
+        sseClients.delete(client);
+      }
+    }
+  });
+
+  app.get("/api/events/stream", (req: Request, res: Response) => {
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    res.flushHeaders();
+
+    sseClients.add(res);
+    res.write(`data: ${JSON.stringify({ type: "CONNECTED", timestamp: new Date().toISOString() })}\n\n`);
+
+    req.on("close", () => {
+      sseClients.delete(res);
+    });
+  });
+
+  // Atomic Site Adapter Rollback Endpoint
+  app.post("/api/adapters/rollback", (req: Request, res: Response) => {
+    try {
+      const { domain, version } = req.body;
+      if (!domain || !version) {
+        return res.status(400).json({ error: "domain and version are required" });
+      }
+      const restored = repo.rollbackSiteAdapter(domain, version);
+      logger.info(`Site adapter atomically rolled back`, { domain, version });
+      res.json({ success: true, restored });
+    } catch (err: unknown) {
+      res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
   // --------------------------------------------------------------------------
   // Benchmark Telemetry
   // --------------------------------------------------------------------------
