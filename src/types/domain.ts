@@ -133,6 +133,10 @@ export const StepBindingSchema = z.object({
     })
     .default({}),
   uniquenessExpectation: z.enum(["SINGLE", "MULTIPLE"]).default("SINGLE"),
+  provenance: z
+    .enum(["TINYFISH_EXPLORER", "TINYFISH_RECOVERY", "TIP_GROUNDED", "MANUAL"])
+    .default("TINYFISH_EXPLORER"),
+  sourceRunId: z.string().optional(),
   domain: z.string().min(1),
   version: z.string().regex(/^\d+\.\d+\.\d+$/, "Version must be SemVer format (e.g. 1.0.0)"),
 });
