@@ -1,0 +1,826 @@
+=== PAGE 1 ===
+Beyond Domains: Reusing Web Skills via Transferable
+Interaction Patterns
+Shiqi He1∗, Yue Cui2, Feijie Wu3, Xinyu Ma4,
+Jiaheng Lu5, Yaliang Li2, Bolin Ding2, Mosharaf Chowdhury1
+1University of Michigan 2Alibaba Group 3Purdue University
+4McMaster University 5University of Pennsylvania
+Abstract
+Large language model (LLM) web agents are usually deployed astool callers:
+each turn, the model reads a fresh page observation and emits one structured tool
+action. When every action is a low-level primitive, horizons grow quickly and so do
+policy-facing LLM completions, dominating latency and cost on benchmarks such
+as Mind2Web and WebArena. Recent systems therefore wrap repeated interaction
+fragments asweb skills: callable tools built from successful trajectories or induced
+programs, so one call can replace several primitives. However, prior skill libraries
+are still triggered mainly by instruction similarity or coarse site metadata, which
+yields lowskill reuseon held-out sites and leaves much of the potential step and
+token reduction on the table.
+We present SKILLMIGRATOR, an agent that learns reusable web skills and trans-
+fers them across sites by matching layout structure rather than specific element
+references. Each induced skill is stored as atransferable interaction pattern(TIP):
+the skill paired with a structural sketch of the snapshot at induction time. At
+test time, SKILLMIGRATORretrieves TIPs by layout similarity and grounds their
+references on the live page. The rest of the stack is standard: accessibility-snapshot
+observations with stable references, and fixed tool calling over primitives plus skill
+invocations. Compared with the state-of-the-art approaches, SKILLMIGRATOR
+reduces the average LLM-action count on successful trajectories by 8–10% across
+both WebArena and Mind2Web at matched success rate.
+1 Introduction
+Web agents translate a user’s natural-language goal into a sequence of browser actions such as
+searching, clicking, typing, and submitting forms, providing a general interface for automating
+tasks that are difficult to script manually. Recent benchmarks such as WebShop [1], Mind2Web [2],
+and WebArena [3] cover e-commerce interaction, open-domain websites, and realistic self-hosted
+environments, highlighting both the practical value and the difficulty of this setting. However, most
+existing web agents rely on an LLM-centered decision loop that repeatedly queries the LLM to predict
+the next action from the current webpage state, often following reasoning-and-acting paradigms
+such as ReAct [4]. This design is flexible but expensive at deployment, since each task may require
+many sequential LLM calls, with cost and latency growing in the length and number of interaction
+trajectories [5]. There is therefore a need for acost-effective web agentthat reduces reliance on the
+LLM.
+Recent work pursues this goal through reusable web skills, which store procedural knowledge from
+prior web interactions and reapply it in future tasks [ 6–10]. A successful interaction trajectory is
+abstracted into a skill that the agent can retrieve and execute when it encounters a similar goal or
+∗Correspondence to:shiqihe@umich.edu
+Preprint.
+arXiv:2606.17645v1  [cs.AI]  16 Jun 2026
+
+=== PAGE 2 ===
+Shopify•E-commerce GitLab•Developer Tools Postmill•Online Forum
+Task:“Add a new product” Task:“Open a new issue” Task:“Create a new forum”
+Primitive actions
+fill(‘Title’, ...)
+fill(‘Description’, ...)
+fill(‘Price’, ...)
+click(‘Save’)
+Primitive actions
+fill(‘Title’, ...)
+fill(‘Description’, ...)
+select_option(‘Type’, ...)
+click(‘Create issue’)
+Primitive actions
+fill(‘Name’, ...)
+fill(‘Title’, ...)
+fill(‘Description’, ...)
+click(‘Create forum’)
+One TIP reusable across all three domains:
+ι :“fill a labelled form and click submit” σ : fill-and-submittemplateΦ :
+
+title-like,body-like, . . .
+	
+plan ⇒fill ∗ then click(submit)(replaces n policy LLM calls with 1 skill call)
+Figure 1:Cross-domain skill reuse motivates SKILLMIGRATOR.Three websites drawn from very
+different domains—Shopify(e-commerce),GitLab(developer tools), andPostmill(online forum)—
+use different page layouts, field vocabularies, and submit-button labels. Yet the three subtasks
+reduce to the same programmatic pattern: fill a few labelled inputs, then click a single submit button.
+Same-colour fields (title-like,body-like,submit) are paraphrases of the same abstract slot across all
+three sites. SKILLMIGRATORstoresoneTIP—intent ι, operation template σ, slot schema Φ, and the
+induction-time tree skeleton τ—and reuses it on all three pages, replacing many policy LLM steps
+with a single skill call.
+webpage state. This replaces many primitive LLM decisions with a single higher-level operation,
+reducing LLM calls and shortening the interaction trajectory. Because the skill encodes a validated
+action pattern, it also mitigates compounding errors in long-horizon navigation [7–9, 11].
+Existing skill-reuse methods fall into two types: reusing web skills underthe same website, where
+the skill is specialized to a specific site and its interface [ 8–10], and reusing web skillsunder the
+same domain, where the skill is transferred across websites that share similar task structures, such as
+shopping, maps, forums, or code repositories [6, 7, 12]. Both directions have important limitations.
+Same-website methods suffer from low reuse rates, because each skill is tied to the specific interface,
+DOM structure, and interaction pattern of the site where it was learned [8–10]. The agent benefits only
+when future tasks revisit that site, which is restrictive in open-web settings where user requests span
+diverse websites. Same-domain methods such as PolySkill [12] address this through polymorphic
+abstractions that separate shared skill interfaces from site-specific implementations, enabling reuse
+across sites within a domain. However, they still confine reuse to a single domain and miss the fact
+that sites across different domains often share strong interaction patterns, as illustrated in Figure 1.
+As a result, current skill-reuse methods remain narrower than necessary, motivating a more general
+form of reusable web skills that can transfer beyond boththe same websiteandthe same domain.
+Obtaining reusable web skills beyond both the same website and the same domain is challenging
+because of unreliable skill retrieval. Existing methods retrieve candidates using instruction similarity,
+intent labels, or website metadata [6, 8, 12]. However, these signals are insufficient for cross-domain
+transfer: two tasks with different wording may require the same interaction program, while two
+textually similar tasks may require different DOM-level control flow. As a result, the agent may fail
+to retrieve useful skills or mistakenly execute unsuitable ones, forcing it to fall back to primitive
+action generation with frequent LLM calls.
+We propose SKILLMIGRATOR, a cost-effective web agent that enables skill reuse beyond boththe
+same websiteandthe same domain. SKILLMIGRATORfollows the standard programmatic-skill
+setting, where observations are accessibility snapshots with stable element references and actions
+are issued through a fixed tool-calling API over primitive actions and skill invocations [8, 9, 12]. Its
+memory unit is a transferable interaction pattern (TIP) , which pairs each induced skill with a structural
+sketch of the webpage snapshot where the skill was validated. At inference time, SKILLMIGRATOR
+2
+
+=== PAGE 3 ===
+retrieves skills from a single global library by combining layout similarity with text signals, then
+grounds the matched abstract constraints to live element references before replaying the skill. This
+design allows the agent to identify reusable interaction patterns across websites with different wording,
+interfaces, and domains, while avoiding the execution of weakly matched skills.
+Contributions.
+• To our knowledge, this is the first work to study reusable web skills across websites beyond domains.
+This setting is non-trivial because similar interaction patterns may appear with different layouts,
+labels, and DOM structures.
+• We propose SKILLMIGRATORfor cross-domain skill matching. It stores induced skills as TIPs,
+each pairing a validated skill with the structural sketch of its source webpage. For a new task,
+SKILLMIGRATORretrieves relevant TIPs using layout and text signals, grounds them to live
+webpage elements, and falls back to primitive control when no reliable match is found.
+• We empirically compare SKILLMIGRATORagainst existing web-agent baselines on Mind2Web
+and WebArena, reducing average LLM-action count on successful trajectories by 8–10% relative to
+the state-of-the-art baselines at matched task success rate.
+2 Background and Motivation
+2.1 Preliminaries and Problem Formulation
+Table 1: Representative primitive tools. e is an element
+ref in the text snapshot. Skill calls expand into grounded
+primitive calls.
+Action Description
+noopWait or synchronize.
+click(e)Activate controle.
+fill(e,text)Type into an input.
+scroll(e,dir)Scroll element or viewport.
+select_option(e,value)Choose an option.
+tab_focus(index)Switch browser tab.
+go_back/go_forwardHistory navigation.
+send_msg_to_user(text)Final user-visible answer.
+stopTerminate with success or failure.
+call_skill(σ,args) Invoke skill σ and exe-
+cute its implementation.
+Web Agent Environment.We follow
+the BrowserGym and WebArena conven-
+tion [13, 3]: at each timestep t, the agent
+receives a Playwright-style accessibility
+snapshot ot with stable refs, roles, names,
+and state attributes, and emits one tool
+call at ∼π θ(· |q, o0:t, a0:t−1) from the
+action space A in Table 1. For bench-
+marks, we consider Mind2Web [2] (cross-
+task, cross-website, cross-domain splits)
+and WebArena [3] (812 executable tasks
+across shopping, admin, reddit, gitlab, map,
+multisite). The default policy input is
+text-only and screenshot-grounded or pixel-
+space agents are outside our scope [14, 15].
+A full formulation is in Appendix A.
+Skill library.Beyond primitive browser actions, recent web agents [ 7, 8, 12] are equipped with
+a skill library K. Each skill k∈ Kis a temporally extended routine [16] that maps a subtask s and
+observation o to a short action sequence k(s, o) =⟨˜a1, . . . ,˜an⟩ over Table 1, exposed to the policy
+as a callable high-level macro, which reuses recurring interaction patterns such as opening a menu,
+filling a form, searching, or filtering.
+Problem Formulation.Given an instruction q, a planner decomposes it into a sequence of subtasks
+s(q) ={s 1, . . . , sTq }. Let ˜o0 be the initial observation and ˜oi the observation after finishing si. We
+define N(s, o| K, πθ) as the number ofnewprimitive actions emitted by πθ to complete s from
+o: if the subtask is fully covered by a retrieved skill, N= 0 ; otherwise the agent falls back to πθ
+and N=n where n is the length of the fallback trajectory. Our goal is to construct a compact skill
+library that minimises the expected number of LLM-generated primitive actions across tasks:
+min
+K
+Eq∼Q
+
+
+TqX
+i=1
+N(s i,˜oi−1 | K, πθ)
+
+ +λ C(K),(1)
+where Q is the task distribution, C(K) is the library cost, and λ trades off action savings against
+library size.
+3
+
+=== PAGE 4 ===
+Cross-Task Cross-Website Cross-Domain0.0
+0.5Skill reuse rate
+0.32
+0.21 0.140.20 0.15 0.08
+0.50
+0.67
+0.33
+ASI SkillWeaver PolySkill
+(a) Skill reuse rate.
+Cross-Task Cross-Website Cross-Domain0
+5
+10
+15Mean effective steps
+7.7 8.2 8.97.6 8.7 8.97.1 7.2 7.6
+ASI SkillWeaver PolySkill (b) Mean effective steps.
+Figure 2: Motivating comparison of ASI, SkillWeaver, and PolySkill on a cumulative Mind2Web-
+style setup: cross-task (same website), cross-website (same domain, new sites), and cross-domain
+(new domains). Subfigure a reports per-phase skill reuse and b show successful-step cost.
+2.2 Skill Induction Methods
+Existing Work.Recent work on reusable procedural knowledge for web and tool-use agents
+includes textual workflow memory (AWM [6]), verified programmatic skills callable as high-level
+actions (ASI [7]), self-induced skill APIs from exploration (SkillWeaver [8]), polymorphic cross-site
+abstractions (PolySkill [12]), and discovered website tools (WALT [9]). Together, these methods
+compress repeated primitive sequences into reusable abstractions, shortening interaction horizons
+and reducing policy LLM calls.
+Limitations.Despite these advances, skill retrieval remains a bottleneck on unseen websites because
+existing methods rely on semantic keys like task descriptions, workflow summaries, skill names and
+API descriptions. Web tasks often preserve interaction structure while changing surface wording, so
+purely semantic retrieval under-retrieves reusable skills—raising N(s, o| K, πθ)—and over-retrieves
+skills whose execution context is incompatible with the current page. Figure 2 illustrates this on a
+60-task Mind2Web subset evaluated with GPT-4.1: skill reuse drops sharply for ASI, SkillWeaver,
+and PolySkill as the test trace moves from cross-task to cross-website to cross-domain (Figure 2a),
+and average successful-step cost rises in lock-step (Figure 2b). This motivates augmenting retrieval
+with a layout-conditioned signal that uses the current observation as additional evidence for reuse
+beyond semantic similarity.
+3 Design
+SKILLMIGRATORreduces N(s i,˜oi−1 | K, πθ) in the objective of §2 by reusing skills in K across
+websites and domains whose surface wording and labels differ. At each pair(s i,˜oi−1), the agent (i)
+summarises the live snapshot and retrieves the most similar skill from K (§3.1); (ii) parses onevalue
+for each slot of that skill from the user’s instruction; and (iii) binds each slot to a concrete control on
+the live page so that the skill expands into grounded primitive actions without an LLM call (§3.2).
+Figure 4 summarises this runtime control flow.
+3.1 Skill Record and Retrieval
+Snapshot.At time t, the observation ot is a Playwright accessibility snapshot, a YAML-like
+serialization of the agent-visible accessibility tree [13]. Each node exposes a semantic role (textbox,
+button, link, heading, . . . ), an accessible name, and a stable agent-addressable referenceref=eN
+that primitive actions use as their target. A deterministic rule scansot once and produces (i) a one-line
+page summary ρ(ot) that lists the page heading, the labelled controls inside the principal form, and
+the primary button labels, and (ii) the listV(o t)of all interactive nodes with their roles and names.
+Skill record.Rather than storing a literal action recipe, which would not survive relabelling on a
+new site, each induced skill is stored as a transferable interaction pattern (TIP)—a tuple
+k=
+
+ιk, σk,Φ k, τk
+
+,(2)
+where ιk is a one-sentence natural-languageintent, σk is the skill’soperation template, drawn from
+a set Σ of templates mined offline by clustering training trajectories on action shape (e.g. a single
+fill on a searchbox followed by a submit, or several fills followed by a labelled button),
+4
+
+=== PAGE 5 ===
+Source trajectory
+SITE: postmill
+TASK: create submission
+Recorded primitives:
+click textbox ‘Title’
+press textbox ‘Title’
+click textbox ‘Body’
+press textbox ‘Body’
+click button ‘Create sub.’
+Stored skillk= (ι k, σk,Φ k, τk)
+ιk :create a new entry by filling
+a labelled form and clicking submit
+σk :fill-and-submittemplate
+Φk :
+
+ξ1, ξ2
+	
+slot schema
+ξ1 =
+
+post_title,
+“the headline of the entry”,
+Tξ1 ={title, headline,
+subject, summary, . . .}
+
+,
+ξ2 =
+
+post_body,
+“the main text content”,
+Tξ2 ={body, description,
+reply, comment, . . .}
+
+τk :form→textbox+button
+Target page
+SITE: shopping admin
+TASK: write review
+Live controls:
+textbox ‘Summary’[e16]
+textbox ‘Review’[e21]
+button ‘Save Review’[e25]
+button ‘Reset’[e26]
+... Status, Nickname, ...
+induce
+§3.1
+retrieve
+Eq.(3)
+Subtask si:“Write a customer review with summary ‘Great fit!’ and detailed comment ‘Comfortable for long training
+runs; true to size and stays cool.’”
+Instantiation dictD:{summary: ‘Great fit!’,comment: ‘Comfortable for long . . . ’}
+Stage A(value parse):
+ξ1 post_title7→‘Great fit!’
+ξ2 post_body7→‘Comfortable for ...’
+Stage B(slot→ref):
+ξ1 →ref=e16(Summary)
+ξ2 →ref=e21(Review)
+submit→ref=e25(Save Review)
+value▷ ◁ref(§3.2)
+Figure 3: End-to-end cross-domain example. A skill induced from a Postmillcreate-submission
+trajectory (left) is retrieved on a shopping-adminwrite-reviewpage (right):post_titleandpost_body
+rebind toSummaryandReviewthrough the synonym pools in Φk, and the bottom panel walks through
+Stage A and Stage B for one subtask. Same-colour fields (title-like,body-like,submit) denote the
+same abstract slot across both pages.
+Φk ={ξ 1, . . . , ξm} is theslot schema, and τk is the cleaned accessibility-tree skeleton of the
+induction-time snapshot, kept as a small labelled tree carrying role and name per node and used by
+the layout signal in Eq. (3). Each slot ξ stores a key (e.g.post_title), a one-line descriptor dξ such
+as“the headline of the new entry”, and a small synonym set Tξ mined from co-clustered training
+trajectories (e.g.title → {title, headline, subject, name, summary, topic}). The record contains no
+ref=eN identifiers, which are properties of the live page at test time. Each operation template σ
+comes with a fixed deterministicplanthat calls fill/click/press primitives once Φk is bound
+(Algorithm 1). Reusing the same template across sites is what makes a skill cross-domain rather than
+a per-trajectory replay.
+Retrieval.Given the current pair (si,˜oi−1), we score each skill k∈ Kby combining atextsignal
+that captureswhat kind of subtaskis being attempted with alayoutsignal that captureswhat kind of
+pagethe agent is on:
+score(k, si,˜oi−1) =αe
+
+si ∥ρ(˜oi−1)
+⊤
+e(δk)| {z }
+text signal
++ (1−α)L
+
+k,˜oi−1
+
+| {z }
+layout signal
+,(3)
+with α∈[0,1] . Here e(·) is a frozen sentence encoder [17], and δk =ι k ∥ Sξ∈Φk (dξ ∥T ξ) is arich
+descriptorconcatenating the skill’s intent with every slot descriptor and synonym, so paraphrased
+subtasks across sites stay close in embedding space [18, 19]. The layout signal L(k,˜oi−1) uses the
+live accessibility-tree structure of ˜oi−1 to ground retrieval in what the page actually exposes. The
+tree edit distance (TED)term 1−TED(τ k, τ(˜oi−1))/max(|τk|,|τ(˜oi−1)|) is computed by APTED
+on small trees [20, 21]. This is the dominant signal when source and target sites use different labels
+for structurally analogous forms.
+We openskill modeonly if score(k⋆, si,˜oi−1)≥β for the top-1 skill k⋆; otherwise the agent stays in
+react mode [4]. This gate matters because not every test subtask has a transferable analog in K, and
+forcing a weakly matched skill on an unrelated page would silently corrupt the trajectory. α and β
+are tuned on held-out training trajectories.
+5
+
+=== PAGE 6 ===
+Algorithm 1SKILLMIGRATORinference for one subtask(s i,˜oi−1).
+Require:subtasks i, snapshot˜oi−1, libraryK, encodere, instantiation dictD, gate thresholdβ.
+1:compute summaryρ(˜o i−1)and node listV(˜o i−1)
+2:k ⋆ ←arg max k∈K score(k, si,˜oi−1)via Eq. (3)
+3:ifscore(k ⋆, si,˜oi−1)< βthen
+4:returnπ θ(si,˜oi−1)▷fall back to react mode
+5:end if
+6:Stage A: Hungarian-solveΦ k⋆ ×Dfor slot values; for any unbound slot, extract a span froms i
+7:Stage B: Hungarian-solveΦ k⋆ ×V(˜oi−1)for slot→ref bindings
+8:emit primitives per the plan ofσ k⋆; escalate any unboundrequiredslot toπ θ
+Instr.
+q Planner Summaryρ, V RetrievalEq. (3) Gateβ Stage Avalue parse Stage Bslot→ref Nextsnapshot
+LibraryK Primitiveπθ
+pass
+fail
+next subtask / stop
+Figure 4: Runtime control flow. Passing the gate β routes the subtask through skill mode (Stage A
+then Stage B). Failing falls back to a single primitive step fromπ θ.
+3.2 Slot Binding and Execution
+Once k⋆ is chosen, the agent must associate each slot ξ∈Φ k⋆ with a concretevaluestring before
+binding it to a control on the page. We follow the cross-domain slot-filling view of Liu et al.
+[18], Wang et al. [19]: a slot is identified by its NL descriptor dξ and synonym pool Tξ, not by its
+training-time key, so unseen vocabulary on the test side does not break the match.
+Stage A: parsing slot values from the instruction.The planner forces each subtask si to expose
+aninstantiation dict D={(η j, vj)}j in the task spec [ 3], where ηj is a key (subject,message,
+from_location, . . . ) andvj is the corresponding value. We score every candidate pair(ξ, ηj)by
+e(dξ ∥T ξ)⊤e(ηj) +λ lit ·⊮[ηj ∈T ξ],
+and run a Hungarian solve [ 22, 23] on the resulting |Φk⋆ | × |D|matrix to obtain a one-to-one
+assignment. The literal bonus λlit is the same disambiguation mechanism long used in slot filling [24]:
+when ηj already appears verbatim insideTξ the match is essentially certain. In the example of Figure 3,
+summaryappears in Tpost_title andcommentin Tpost_body, so the source-trajectory keys (post_title,
+post_body) are correctly bound to the target keys (summary,comment).
+When D is empty or covers fewer slots thanΦk⋆ needs, we extract candidate spansC(si) directly from
+the instruction text using a fixed cue grammar (quoted strings, list literals, dates, URLs,from X to Y,
+titled X,named X, capitalised proper-noun phrases, . . . ). Each span c comes with a small prior
+reflecting how distinctive its cue is (e.g. a quoted string is a stronger signal than a bare capitalisation).
+We then score e(dξ ∥T ξ)⊤e(ctx(c)) on the surrounding context window with the candidate replaced
+by a placeholder, and run a Hungarian assignment. The two paths are run in order: dict-match first,
+then instruction-extract for any still-unbound slot.
+Stage B: binding each slot to a control on the page.The bound values must finally be typed
+into actual page controls. For every interactive node v∈V(˜o i−1) we build a deterministiccontrol
+descriptor d(v) = role(v)∥name(v) , score every (slot, control) pair by e(dξ ∥T ξ)⊤e(d(v)), restrict
+to controls of compatible role (textbox-like for fillable slots), and run a second Hungarian solve. An
+assignment is accepted only above a similarity threshold. Below it we declare the slotunboundand
+fall back toπ θ for that slot.
+The critical effect of this stage is that thenumber of fillsemitted on the live page is determined by
+the live page and the matched slots, not by the action count of the source trajectory. On a five-field
+form likeCreate new forum(Name, Title, Description, Sidebar, Tags), an instantiation dict that
+supplies only three values fills only the three matching textboxes and leaves the other two empty; on
+6
+
+=== PAGE 7 ===
+Table 2: WebArena per-domain task success rate (SR, %) and average LLM-action count ¯N on
+successful trajectories. ¯Nrows are extracted from trajectory logs under one unified counter.
+SHOPADMINREDDITGITLABMAPMULTIAVG.
+METHODSR ¯NSR ¯NSR ¯NSR ¯NSR ¯NSR ¯NSR ¯N
+ReAct [4] 37.4 6.1 44.0 7.0 66.0 5.0 38.9 7.5 16.4 4.5 10.3 10.5 38.5 6.5
+SkillWeaver [8] 39.3 5.7 48.2 6.5 71.2 4.7 50.3 7.0 17.2 4.2 16.3 9.8 43.6 6.1
+ASI [7] 46.3 5.8 53.6 6.6 73.7 4.8 46.8 7.1 21.5 4.3 15.1 10.0 46.5 6.2
+PolySkill [12] 51.4 5.5 54.8 6.3 73.2 4.5 54.2 6.8 18.9 4.0 18.9 9.5 49.3 5.9
+SKILLMIGRATOR45.54.852.75.672.64.546.76.719.33.016.79.445.75.4
+a two-field form likeNew issue(Title, Description) the same skill emits two fills. This handles the
+variable-arity issue without touching the stored skill record.
+Plan execution.Each operation template σ∈Σ has a fixed plan keyed on the bound slots. Asearch
+template emits a fill on the search input and a click on the submit button, or a press(Enter)
+when no submit button binds. Afill-and-submittemplate emits one fill per bound slot in declared
+order, then a click on the button whose label matches the global submit-keyword pool (create,
+submit, post, send, save, update, publish) mined from training. Aclick-by-texttemplate emits a single
+click on the link or cell whose name best matches the target value. Any unboundrequiredslot
+escalates toπ θ.
+4 Experiments
+We evaluate SKILLMIGRATORwith a focus on the LLM-action count N(s i,˜oi−1 | K, πθ) from
+Eq. (1) of §2, corresponding to theaverage successful tool stepsmetric used in prior work [ 7, 12].
+Three research questions organise the evaluation:
+• RQ1.Does SKILLMIGRATORreduce N while preserving task success rate on different splits
+where previous baselines are restricted to within-domain reuse?
+• RQ2.Does SKILLMIGRATORcomposewith existing skill libraries: when its gate falls back, does
+plugging an ASI or PolySkill library underneath add to the gain?
+• RQ3.Which component is responsible for the gain, and how sensitive are the results to the weight
+αand gate thresholdβ?
+4.1 Setup
+Benchmarks and baselines.We evaluate onMind2Web[ 2] (137 websites, 31 domains, cross-task
+/ cross-website / cross-domain splits) andWebArena[ 3] (812 executable tasks across 6 columns).
+Baselines areReAct[ 4] (no skill library), SkillWeaver [8], ASI [7], and PolySkill [12]. ASI, PolySkill,
+and SKILLMIGRATORare each reported in both astaticregime (library fixed before evaluation) and
+an+Updateregime (skills induced online during evaluation), following PolySkill.
+Metrics.The main metric is theaverage LLM-action counton successful trajectories, ¯N=
+Eq∈Dsucc
+P
+i N(s i,˜oi−1 | K, πθ), counting one LLM call per primitive tool action and zero perretrieved skill. We additionally report task success rate (SR), skill reuse rate, and library size|K|.
+Configuration.Unless stated otherwise we use α= 0.6 for the text/layout mixing weight in
+Eq. (3) and β= 0.20 for the gate threshold of §3.1. Both were selected on a 10% subset of training
+trajectories without overlapping with any test set. More details are in Appendix B.
+4.2 Main Results
+Tables 2 and 3, together with the scatter in Figure 5, answer RQ1. The pattern is consistent across
+both benchmarks: SKILLMIGRATORsits at or just below the strongest baseline on SR, but spends
+noticeably fewer LLM calls per successful trajectory and reuses more skills across the test pool. On
+WebArena, aggregate SR is within −3.6 points of PolySkill but ¯N drops from 5.9 to 5.4—an 8.5%
+7
+
+=== PAGE 8 ===
+Table 3: Mind2Web success rate, average LLM-action count ¯N , and library size |K| on the three
+generalisation splits with GPT-4.1. Methods are reported in two regimes: astaticlibrary (rows without
+the(+Update)suffix) fixed before evaluation, and an+Updateregime (rows tagged(+Update)) in
+which new skills are induced online during evaluation.
+CROSS-TASKCROSS-WEBSITECROSS-DOMAIN
+METHODSR ¯N |K|SR ¯N |K|SR ¯N |K|REUSE%
+ReAct [4] 53.8 7.0 – 56.2 7.5 – 62.3 8.0 – –
+ASI [7] 52.3 6.6 50 54.9 7.1 47 57.3 7.6 33 17.4
+PolySkill [12] 55.4 6.3 43 57.6 6.8 44 60.1 7.2 36 22.7
+SKILLMIGRATOR54.85.8 3557.16.2 3859.46.6 31 28.1
+ASI [7] (+Update) 59.4 6.4 66 58.7 6.9 71 62.1 7.4 66 23.6
+PolySkill [12] (+Update) 63.2 6.0 47 61.3 6.5 53 63.4 6.9 56 31.0
+SKILLMIGRATOR(+Update) 62.75.5 4160.55.9 4763.06.2 49 35.4
+5.0 5.5 6.0 6.5 7.0
+Avg LLM-action count ̄
+35
+40
+45
+50Success Rate (%)
+ReAct
+SkillWeaver
+ASI
+PolySkill
+SkillMigrator
+better
+(a) WebArena average.
+6.0 6.5 7.0 7.5 8.0 8.5
+Avg LLM-action count ̄
+56
+58
+60
+62
+64
+66Success Rate (%)
+ReAct
+ASI
+PolySkill
+ASI(+U)
+PolySkill(+U)
+SkillMigrator
+SkillMigrator(+U)
+better (b) Mind2Web cross-domain.
+Figure 5: Success rate against average LLM-action count ¯N (lower-left is better on both axes).
+SKILLMIGRATORsits left of every baseline at comparable SR on both benchmarks, using fewer
+LLM calls per successful trajectory.
+reduction in policy LLM calls, and 16.9% against the ReAct baseline of 6.5. On Mind2Web the
+same trade-off shows up: SKILLMIGRATOR(+Update) achieves a 63.0% SR on cross-domain at
+¯N= 6.2, against PolySkill (+Update)’s 63.4% SR and ¯N= 6.9. The reuse rate further supports this
+result: cross-domain reuse rises to 35.4% versus PolySkill’s 31%, while the library size is consistently
+smaller. Overall, SKILLMIGRATORreduces LLM calls per successful trajectory and improves skill
+reuse on previously unseen domains without a significant decrease in accuracy.
+4.3 Orthogonality with Existing Skill Libraries
+RQ2 asks whether SKILLMIGRATORcompeteswith baselines orcomposeswith them. When the
+gate falls back, the agent does not need to revert to raw ReAct: control can pass to a secondary library
+trained by another method. Table 4a shows the result. The hybrid SKILLMIGRATOR+PolySkill row
+reaches the lowest ¯N in the table (5.3, vs. 5.4 alone and 5.9 for PolySkill alone), and its 47.7% SR
+sits between the two single-library numbers (45.7 and 49.3). The two libraries cover different slices
+of the test set: when a layout match exists, the layout signal triggers a SKILLMIGRATORskill. When
+no such match exists, control routes to PolySkill underneath. In practice, SKILLMIGRATORcan
+behave as a retrieval layer that sits on top of existing skill-induction systems rather than competing
+with them.
+4.4 Ablation Study
+For RQ3, Table 4b isolates three ingredients: the layout signal L (text onlypushes α to 1), the
+slot-synonym pool Tξ (no synonymsremoves paraphrase coverage), and the gate (no gatesets β= 0).
+The biggest move is on the WebArena average SR: removingL drops 6.5 points (45.7→39.2) and
+lands almost on top of the no-skill baseline (38.5%), because instruction text alone cannot tell apart
+8
+
+=== PAGE 9 ===
+Table 4: Orthogonality study (a) and component ablations (b) on the WebArena.
+(a) WebArena average when the gate of SKILLMI-
+GRATORfalls back to a secondary library.
+CONFIGURATIONSR % ¯N
+ASI alone [7] 46.5 6.2
+PolySkill alone [12] 49.3 5.9
+SKILLMIGRATORalone (gate→ReAct) 45.7 5.4
+SKILLMIGRATOR+ ASI 47.2 5.3
+SKILLMIGRATOR+ PolySkill47.7 5.3
+(b) Each row removes one element of SKILLMIGRATOR.
+Lower ¯Nis better.
+WA AVG. M2W CD
+VARIANTSR % ¯NSR % ¯N
+Full SKILLMIGRATOR45.7 5.4 59.4 6.6
+text only (α= 1) 39.2 5.7 55.8 7.3
+no synonyms 45.4 5.4 57.0 7.1
+no gate (β= 0) 45.3 4.7 57.8 6.3
+0.0 0.2 0.4 0.6 0.8 1.0
+α (text →  layout mixing weight)
+38
+40
+42
+44
+46
+48SR (%)
+α=0.6 default
+4.4
+4.8
+5.2
+5.6
+6.0
+6.4
+̄
+(a) Sweepα.
+0.0 0.2 0.4
+β (gate threshold)
+44
+45
+46
+47
+48SR (%)
+β=0.20 default
+4.5
+4.8
+5.1
+5.4
+5.7
+̄
+ (b) Sweepβ.
+GPT-4.1 Claude-4
+ 
+0
+10
+20
+30
+40
+50
+60
+70SR (%)
+45.7%
+54.7%
+0.0
+1.0
+2.0
+3.0
+4.0
+5.0
+6.0
+7.0
+̄
+5.4
+5.1 (c) Backbone.
+Figure 6: Sensitivity to the mixing weight α, the gate threshold β, and the LLM backbone, on the
+WebArena. Blue (left axis) is success rate. Orange (right axis) is the average LLM-action count ¯N.
+same-wording, different-structure pages. On Mind2Web cross-domain the same ablation costs 3.6
+points (59.4→55.8), andno synonymscosts another 2.4 (59.4 →57.0): paraphrase coverage matters
+most when the target site renames its labels. Disabling the gate is the only ablation that lowers ¯N
+(5.4→4.7 on WebArena; 6.6→6.3 on Mind2Web) at almost no SR cost (−0.4 on WebArena), so the
+default β= 0.20 errs on the conservative side—a deployment that tolerates more skill triggers can
+push for further LLM-call savings.
+4.5 Sensitivity Analysis
+We sweep α∈ {0.0,0.2, . . . ,1.0}and β∈ {0.0,0.1, . . . ,0.5}on WebArena with GPT-4.1, and
+re-run the headline configuration on Claude-4. Hyperparameters were chosen on a held-out 10% of
+training trajectories, never on the test set. Figure 6a shows that SR is essentially flat for α∈[0.0,0.6]
+(within 0.6 points of the default 45.7%) and collapses to 39.3% at α= 1.0, the same drop seen in the
+text onlyablation—layout signal is doing the heavy lifting. Figure 6b shows the β sweep behaving as
+a precision/recall trade-off: ¯N slides from 5.6 down to 4.7 as β→0 while SR moves only between
+45.3% and 45.7%, so β is a deployment knob rather than a critical hyperparameter. Figure 6c swaps
+the LLM backbone: Claude-4 gives 54.7% SR and ¯N= 5.1 versus 45.7% SR and ¯N= 5.4 on
+GPT-4.1, a +9-point SR shift. The gains come from the retrieval design and ride on top of whatever
+absolute performance the backbone supplies.
+5 Conclusion
+We presented SKILLMIGRATOR, a web agent that keeps the standardtext snapshot + tool calling
+interface used by recent skill-induction systems [7, 12, 8] but indexes induced skills astransferable
+interaction patterns (TIP)—pairing each skill with a structural sketch of the snapshot at induction
+time, and retrieving globally by layout similarity before grounding to live element references. On
+Mind2Web and WebArena, this reduces the average LLM-action count on successful trajectories by
+8–10% over the state-of-the-art methods, at matched task success rate.
+9
+
+=== PAGE 10 ===
+References
+[1] Shunyu Yao, Howard Chen, John Yang, and Karthik Narasimhan. Webshop: Towards scalable
+real-world web interaction with grounded language agents.Advances in Neural Information
+Processing Systems, 35:20744–20757, 2022.
+[2] Xiang Deng, Yu Gu, Boyuan Zheng, Shijie Chen, Samuel Stevens, Boshi Wang, Huan Sun, and
+Yu Su. Mind2web: Towards a generalist agent for the web.Advances in Neural Information
+Processing Systems, 36:28091–28114, 2023.
+[3] Shuyan Zhou, Frank F. Xu, Hao Zhu, Xuhui Zhou, Robert Lo, Abishek Sridhar, Xianyi Cheng,
+Tianyue Ou, Yonatan Bisk, Daniel Fried, Uri Alon, and Graham Neubig. Webarena: A realistic
+web environment for building autonomous agents. InInternational Conference on Learning
+Representations, 2024.
+[4] Shunyu Yao, Jeffrey Zhao, Dian Yu, Nan Du, Izhak Shafran, Karthik Narasimhan, and Yuan
+Cao. React: Synergizing reasoning and acting in language models. InInternational Conference
+on Learning Representations, 2023.
+[5] Ke Yang, Yao Liu, Sapana Chaudhary, Rasool Fakoor, Pratik Chaudhari, George Karypis, and
+Huzefa Rangwala. Agentoccam: A simple yet strong baseline for llm-based web agents.arXiv
+preprint arXiv:2410.13825, 2024.
+[6] Zora Zhiruo Wang, Jiayuan Mao, Daniel Fried, and Graham Neubig. Agent workflow memory.
+arXiv preprint arXiv:2409.07429, 2024.
+[7] Zora Zhiruo Wang, Apurva Gandhi, Graham Neubig, and Daniel Fried. Inducing programmatic
+skills for agentic tasks.arXiv preprint arXiv:2504.06821, 2025.
+[8] Boyuan Zheng, Michael Y . Fatemi, Xiaolong Jin, Zora Zhiruo Wang, Apurva Gandhi, Yueqi
+Song, Yu Gu, Jayanth Srinivasa, Gaowen Liu, Graham Neubig, and Yu Su. Skillweaver: Web
+agents can self-improve by discovering and honing skills.arXiv preprint arXiv:2504.07079,
+2025.
+[9] Viraj Prabhu, Yutong Dai, Matthew Fernandez, Jing Gu, Krithika Ramakrishnan, Yanqi Luo,
+Silvio Savarese, Caiming Xiong, Junnan Li, Zeyuan Chen, and Ran Xu. WALT: Web agents
+that learn tools.arXiv preprint arXiv:2510.01524, 2025.
+[10] Zhaoyang Wang, Qianhui Wu, Xuchao Zhang, Chaoyun Zhang, Wenlin Yao, Fazle Elahi Faisal,
+Baolin Peng, Si Qin, Suman Nath, Qingwei Lin, et al. Webxskill: Skill learning for autonomous
+web agents.arXiv preprint arXiv:2604.13318, 2026.
+[11] Zijian Lu, Yiping Zuo, Yupeng Nie, Xin He, Weibei Fan, Lianyong Qi, and Shi Jin. Contractskill:
+Repairable contract-based skills for multimodal web agents.arXiv preprint arXiv:2603.20340,
+2026.
+[12] Simon Yu, Gang Li, Weiyan Shi, and Peng Qi. PolySkill: Learning generalizable skills through
+polymorphic abstraction for continual learning. InInternational Conference on Learning
+Representations, 2026.
+[13] Alexandre Drouin, Maxime Gasse, Massimo Caccia, Issam H Laradji, Manuel Del Verme,
+Tom Marty, Léo Boisvert, Megh Thakkar, Quentin Cappart, David Vazquez, et al. Workarena:
+How capable are web agents at solving common knowledge work tasks?arXiv preprint
+arXiv:2403.07718, 2024.
+[14] Hongliang He, Wenlin Yao, Kaixin Ma, Wenhao Yu, Yong Dai, Hongming Zhang, Zhenzhong
+Lan, and Dong Yu. Webvoyager: Building an end-to-end web agent with large multimodal
+models. InProceedings of the 62nd Annual Meeting of the Association for Computational
+Linguistics (Volume 1: Long Papers), pages 6864–6890, 2024.
+[15] Jing Yu Koh, Robert Lo, Lawrence Jang, Vikram Duvvur, Ming Lim, Po-Yu Huang, Graham
+Neubig, Shuyan Zhou, Russ Salakhutdinov, and Daniel Fried. Visualwebarena: Evaluating
+multimodal agents on realistic visual web tasks. InProceedings of the 62nd Annual Meeting of
+the Association for Computational Linguistics (Volume 1: Long Papers), 2024.
+10
+
+=== PAGE 11 ===
+[16] Richard S. Sutton, Doina Precup, and Satinder Singh. Between MDPs and semi-MDPs: A
+framework for temporal abstraction in reinforcement learning.Artificial Intelligence, 112(1–2):
+181–211, 1999.
+[17] Nils Reimers and Iryna Gurevych. Sentence-BERT: Sentence embeddings using siamese BERT-
+networks. InProceedings of the 2019 Conference on Empirical Methods in Natural Language
+Processing and the 9th International Joint Conference on Natural Language Processing, pages
+3982–3992, 2019.
+[18] Zihan Liu, Genta Indra Winata, Peng Xu, and Pascale Fung. Coach: A coarse-to-fine approach
+for cross-domain slot filling. InProceedings of the 58th Annual Meeting of the Association for
+Computational Linguistics (ACL), pages 19–25, 2020. URL https://aclanthology.org/
+2020.acl-main.3/.
+[19] Liwen Wang, Xuefeng Li, Jiachi Liu, Keqing He, Yuanmeng Yan, and Weiran Xu. Bridge to
+target domain by prototypical contrastive learning and label confusion: Re-explore zero-shot
+learning for slot filling. InProceedings of the 2021 Conference on Empirical Methods in Natural
+Language Processing (EMNLP), pages 9474–9480, 2021. URL https://aclanthology.
+org/2021.emnlp-main.746/.
+[20] Kuo-Chung Tai. The tree-to-tree correction problem.Journal of the ACM, 26(3):422–433,
+1979.
+[21] Mateusz Pawlik and Nikolaus Augsten. Tree edit distance: Robust and memory-efficient.
+Information Systems, 56:157–173, 2016.
+[22] Harold W. Kuhn. The Hungarian method for the assignment problem.Naval Research Logistics
+Quarterly, 2(1–2):83–97, 1955.
+[23] James Munkres. Algorithms for the assignment and transportation problems.Journal of the
+Society for Industrial and Applied Mathematics, 5(1):32–38, 1957.
+[24] Ankur Bapna, Gokhan Tür, Dilek Hakkani-Tür, and Larry Heck. Towards zero-shot frame
+semantic parsing for domain scaling. InInterspeech 2017, pages 2476–2480, 2017. doi:
+10.21437/Interspeech.2017-518.
+[25] Leslie Pack Kaelbling, Michael L. Littman, and Anthony R. Cassandra. Planning and acting in
+partially observable stochastic domains.Artificial Intelligence, 101(1–2):99–134, 1998.
+[26] Tianlin Shi, Andrej Karpathy, Linxi Fan, Jonathan Hernandez, and Percy Liang. World of
+bits: An open-domain platform for web-based agents. InInternational Conference on Machine
+Learning, pages 3135–3144. PMLR, 2017.
+[27] Tianci Xue, Weijian Qi, Tianneng Shi, Chan Hee Song, Boyu Gou, Dawn Song, Huan Sun,
+and Yu Su. An illusion of progress? assessing the current state of web agents.arXiv preprint
+arXiv:2504.01382, 2025.
+[28] Dawei Gao, Zitao Li, Yuexiang Xie, Weirui Kuang, Liuyi Yao, Bingchen Qian, Zhijian Ma, Yue
+Cui, Haohao Luo, Shen Li, Lu Yi, Yi Yu, Shiqi He, Zhiling Luo, Wenmeng Zhou, Zhicheng
+Zhang, Xuguang He, Ziqian Chen, Weikai Liao, Farruh Isakulovich Kushnazarov, Yaliang Li,
+Bolin Ding, and Jingren Zhou. Agentscope 1.0: A developer-centric framework for building
+agentic applications.CoRR, abs/2508.16279, 2025.
+[29] Shiqi He, Yue Cui, Xinyu Ma, Yaliang Li, Bolin Ding, and Mosharaf Chowdhury. Branch-and-
+browse: Efficient and controllable web exploration with tree-structured reasoning and action
+memory.arXiv preprint arXiv:2510.19838, 2025.
+[30] Lawrence Keunho Jang, Jing Yu Koh, Daniel Fried, and Ruslan Salakhutdinov. Odysseys:
+Benchmarking web agents on realistic long horizon tasks.arXiv preprint arXiv:2604.24964,
+2026.
+[31] Tanmay Gupta, Piper Wolters, Zixian Ma, Peter Sushko, Rock Yuren Pang, Diego Llanes, Yue
+Yang, Taira Anderson, Boyuan Zheng, Zhongzheng Ren, et al. Molmoweb: Open visual web
+agent and open data for the open web.arXiv preprint arXiv:2604.08516, 2026.
+11
+
+=== PAGE 12 ===
+Appendix
+A Detailed Problem Formulation
+This appendix expands the description of the web-agent setting that we summarised in §2.
+Web agent environment.We model web navigation as a partially observable sequential decision
+process, following the standard view of interactive agents in uncertain environments [25]. A task
+is specified by a natural-language instruction q. Since a real web application may contain hidden
+browser state, server-side state, and asynchronous page updates, the agent only observes an agent-
+visible representation of the environment. We use an observation-level abstraction and denote the
+observation space by S. At time step t, the agent receives an observation ot ∈ S, which may
+include the rendered viewport, the DOM, the accessibility tree, and other browser metadata. This
+representation is consistent with prior web-agent benchmarks, where agents interact with web pages
+through visual and structural observations [26, 2, 3, 15].
+Given the current observation, the agent selects an executable action using an LLMπθ via at ∼π θ(· |
+q, o0:t, a0:t−1), where o0:t and a0:t−1 are observation and action histories, respectively. All actions are
+chosen from the valid action space A defined in Table 1, such as click(e) and fill(e,text ). After
+execution, the web environment returns a new observation,ot+1 =T(o t, at), where T:S × A → S
+is the transition function induced by the browser and the web application. For simplicity, we write T
+as deterministic, although real web transitions may be stochastic due to network latency, dynamic
+content, or nondeterministic server responses.
+Subtasks and the LLM-action count.Given an instruction q, the planner decomposes it into
+subtasks s(q) ={s 1, . . . , sTq }. Let ˜oi denote the observation after finishing subtask si, so ˜oi−1 is
+the observation before executing si. For each pair (si,˜oi−1), the agent retrieves a relevant skill from
+K when available. If the subtask is fully covered by a retrieved skill, then N(s i,˜oi−1 | K, πθ) = 0;
+otherwise the agent falls back to πθ and generates a trajectory τ= (o (0), a1, o(1), . . . , an, o(n)),
+where o(0) = ˜oi−1, o(j) =T(o (j−1), aj), and N(s i,˜oi−1 | K, πθ) =n . Equation (1) of the main
+paper directly minimises the expectation of Pi N(s i,˜oi−1 | K, πθ) plus a library-cost regulariserλ C(K).
+B Experimental Setup Details
+This appendix expands the condensed Setup of §4.1 with full benchmark protocol, baseline regimes,
+and reproducibility details.
+Benchmarks.Mind2Web[ 2] spans 137 websites across 31 domains and is partitioned into three
+generalisation splits: cross-task (same website, new task), cross-website (same domain, new website),
+and cross-domain (new domain). Task success is adjudicated by the previous GPT-4.1 judge protocol
+[12, 27], which has ∼85% agreement with human judgments on this benchmark.WebArena[ 3]
+provides 812 executable tasks across shopping, shopping-admin, reddit, gitlab, map, and multi-site
+columns, scored with the official programmatic validators. We follow the same accessibility-snapshot
+and tool-calling protocol used by PolySkill, which keeps the action schema fixed across compared
+systems and isolates the contribution of skill retrieval and grounding.
+Implementation.Our system is implemented on top of the Playwright MCP framework 1
+and AgentScope [ 28] for unified agent orchestration and reasoning. In addition, we use
+sentence-transformers/all-MiniLM-L6-v2 [17] as the frozen sentence encoder e(·), with
+no fine-tuning on SKILLMIGRATORdata. All embedding similarities reported in Eq. (3) are co-
+sine similarities of L2-normalised vectors. Tree-edit distance for the layout signal is computed by
+APTED [21] on the cleaned accessibility-tree skeletons.
+Skill induction parity.Skills are induced from the same training trajectories used by ASI [ 7] and
+PolySkill [12], with their respective induction pipelines, so that the only variable across systems is
+1https://github.com/microsoft/playwright-mcp
+12
+
+=== PAGE 13 ===
+the retrieval and grounding stack of SKILLMIGRATOR. All reported numbers are means over three
+random seeds.
+C Related Work
+C.1 LLM-based Web Agents and Evaluation Environments
+Web agents aim to translate natural-language instructions into executable browser actions over
+interactive webpages. This problem has been studied through increasingly realistic benchmarks and
+environments, including WebShop [1], Mind2Web [2], WebArena [3], and Branch-and-Browse [29].
+In these settings, agents typically operate in a step-wise decision loop, observing the current webpage
+state and predicting one low-level action at a time, often following reasoning-and-acting paradigms
+such as ReAct [ 4]. This design provides broad flexibility, but it also makes deployment costly
+on long-horizon tasks, since each primitive action may require a separate policy-facing LLM call.
+Subsequent work further expanded the evaluation landscape to multimodal and realistic settings, such
+as WebV oyager [14], VisualWebArena [15], WorkArena [13], Odysseys [30], and MolmoWeb [31].
+Recent analysis has also highlighted that benchmark improvements do not always imply robust
+general web competence, motivating more careful measurement of efficiency and generalization in
+addition to task success [27].
+C.2 Reusable Web Skills
+To reduce repeated low-level reasoning, a growing line of work studies reusable web skills, which
+compress frequently occurring primitive action sequences into higher-level abstractions. One line of
+work stores reusable procedural knowledge in textual form. Agent Workflow Memory (AWM) [6]
+induces workflow memories from successful episodes and reuses them to guide future problem
+solving, improving long-horizon behavior through experience reuse. Another line of work emphasizes
+executable skill representations. ASI [7] induces programmatic skills from successful trajectories
+and exposes them directly as callable actions. SkillWeaver [ 8] studies self-improvement through
+exploration, discovery, and iterative honing of reusable web skills. W ALT [9] further argues that agents
+should exploit higher-level website tools rather than rely entirely on brittle primitive UI interactions.
+PolySkill [12] improves transfer by introducing polymorphic abstractions across websites, while more
+recent work explores richer skill formulations, such as combining executability with interpretability
+or improving repairability and verification [10, 11]. Across these methods, the common goal is to
+shorten interaction horizons, reduce policy LLM calls, and improve robustness by reusing validated
+behavioral structure rather than regenerating every action from scratch.
+Our work is most closely related to recent programmatic-skill web agents [7–9, 12], but differs in what
+it treats as the main bottleneck. Rather than focusing primarily on how to induce or refine the internal
+implementation of a skill, we focus on how to retrieve and ground previously induced skills under
+broader transfer conditions. In particular, we target reuse beyond both the same website and the same
+domain. To do so, we index each skill not only by text but also by a structural sketch of the webpage
+snapshot at induction time, and retrieve from a global library using layout-aware matching before
+grounding abstract constraints to live element references. In this sense, our method complements prior
+work on workflow memory, executable skill induction, and polymorphic abstraction by emphasizing
+transferable interaction patterns as the retrieval key for cross-website and cross-domain reuse.
+D Limitations
+Layout-conditioned retrieval assumes that pages sharing accessibility-tree structure also share inter-
+action semantics. This holds for some workflows we evaluate but weakens on visually isomorphic
+pages whose control flow diverges, where lightweight multimodal cues [14, 15] would be a natural
+complement to our text-only setting. In addition, the operation templates are mined from observed
+action shapes, so modalities outside this distribution (e.g. drag-and-drop, modal dialogs) fall back
+to react mode until the inventory is extended. SKILLMIGRATORreduces the LLM-call cost of web
+automation, which can improve efficiency and latency for repeated tasks. At the same time, lower-cost
+automation may increase the scale of automated web actions. Deployments should respect host-site
+usage policies, rate limits, authentication boundaries, and user consent requirements, and should not
+use skill reuse to bypass access controls or generate abusive traffic.
+13
+
