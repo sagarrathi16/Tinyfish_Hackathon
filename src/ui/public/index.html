@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ShadowTwin — Autonomous Workflow Compiler & Self-Healing Runtime</title>
+  <style>
+    :root {
+      --bg: #0b0f19;
+      --card-bg: #111827;
+      --border: #1f2937;
+      --accent: #3b82f6;
+      --accent-hover: #2563eb;
+      --text: #f3f4f6;
+      --text-muted: #9ca3af;
+      --success: #10b981;
+      --danger: #ef4444;
+      --warning: #f59e0b;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background-color: var(--bg); color: var(--text); padding: 24px; min-height: 100vh; }
+    header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border); padding-bottom: 16px; margin-bottom: 24px; }
+    h1 { font-size: 1.5rem; display: flex; align-items: center; gap: 8px; }
+    .badge { font-size: 0.75rem; background: var(--border); padding: 4px 8px; border-radius: 9999px; text-transform: uppercase; }
+    .badge.online { background: #064e3b; color: #6ee7b7; }
+    .grid { display: grid; grid-template-columns: 2fr 1fr; gap: 24px; }
+    .card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 8px; padding: 20px; }
+    .card h2 { font-size: 1.1rem; margin-bottom: 12px; color: var(--text-muted); }
+    .status-panel { display: flex; flex-direction: column; gap: 12px; }
+    .status-row { display: flex; justify-content: space-between; border-bottom: 1px solid var(--border); padding-bottom: 8px; font-size: 0.9rem; }
+    .actions { display: flex; gap: 12px; margin-top: 20px; }
+    button { background: var(--accent); color: white; border: none; padding: 10px 18px; border-radius: 6px; font-weight: 600; cursor: pointer; transition: background 0.2s; }
+    button:hover { background: var(--accent-hover); }
+    pre { background: #030712; padding: 12px; border-radius: 6px; font-size: 0.85rem; overflow-x: auto; color: #a7f3d0; }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>ShadowTwin <span class="badge">MVP Scaffold</span></h1>
+      <p style="color: var(--text-muted); font-size: 0.875rem; margin-top: 4px;">
+        TinyFish Exploration · Parameterized Replay · Autonomous Self-Healing
+      </p>
+    </div>
+    <span id="health-status" class="badge">Checking health...</span>
+  </header>
+
+  <div class="grid">
+    <div class="card">
+      <h2>Workflow Studio</h2>
+      <p style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 16px;">
+        Deterministic execution with TinyFish as the live compiler & self-healing brain.
+      </p>
+      <div class="actions">
+        <button id="btn-check" onclick="checkHealth()">Verify Diagnostics</button>
+      </div>
+      <div style="margin-top: 20px;">
+        <h3 style="font-size: 0.9rem; color: var(--text-muted); margin-bottom: 8px;">System Output:</h3>
+        <pre id="output">Waiting for command...</pre>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Live Telemetry</h2>
+      <div class="status-panel">
+        <div class="status-row"><span>Service Status</span><strong id="svc-status">-</strong></div>
+        <div class="status-row"><span>Environment</span><strong id="svc-env">-</strong></div>
+        <div class="status-row"><span>TinyFish Key</span><strong id="svc-tf">-</strong></div>
+        <div class="status-row"><span>Permitted Domains</span><strong id="svc-domains">-</strong></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    async function checkHealth() {
+      const output = document.getElementById('output');
+      const healthBadge = document.getElementById('health-status');
+      output.textContent = 'Calling /api/diagnostics...';
+
+      try {
+        const res = await fetch('/api/diagnostics');
+        const data = await res.json();
+        output.textContent = JSON.stringify(data, null, 2);
+
+        healthBadge.textContent = 'SYSTEM ONLINE';
+        healthBadge.className = 'badge online';
+
+        document.getElementById('svc-status').textContent = 'READY';
+        document.getElementById('svc-env').textContent = data.environment;
+        document.getElementById('svc-tf').textContent = data.tinyFishKeyStatus;
+        document.getElementById('svc-domains').textContent = data.allowedTargetDomains.length + ' domains';
+      } catch (err) {
+        output.textContent = 'Error contacting server: ' + err.message;
+        healthBadge.textContent = 'OFFLINE';
+        healthBadge.className = 'badge';
+      }
+    }
+
+    // Auto-check on load
+    window.addEventListener('DOMContentLoaded', checkHealth);
+  </script>
+</body>
+</html>
