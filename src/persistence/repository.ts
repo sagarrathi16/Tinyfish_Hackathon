@@ -252,6 +252,14 @@ export class Repository {
     return rows.map((r) => RunEventSchema.parse(JSON.parse(r.data_json)));
   }
 
+  listRecentEvents(limit: number = 50): RunEvent[] {
+    const stmt = this.db.prepare(`
+      SELECT data_json FROM run_events ORDER BY sequence_id DESC LIMIT ?
+    `);
+    const rows = stmt.all(limit) as Array<{ data_json: string }>;
+    return rows.map((r) => RunEventSchema.parse(JSON.parse(r.data_json)));
+  }
+
   // ==========================================================================
   // Task & Execution Runs
   // ==========================================================================

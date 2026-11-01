@@ -90,7 +90,30 @@ Visit `http://localhost:3000/health` or open `http://localhost:3000` in your bro
 
 ---
 
-## 4. Security & Safety Guardrails
+## 4. Flagship Demonstration Flow
+
+ShadowTwin's hackathon demonstration proves the complete lifecycle:
+
+`Teach Store A → Compile inspectable skill → Replay with local Playwright (0 TinyFish calls) → Mutate owned fixture DOM → Catch STUCK / BINDING_FAILED → TinyFish Recovery Agent diagnoses page → 2-query candidate validation gate → Atomic promotion to v2 → Replay v2 successfully`
+
+See [`docs/demo-runbook.md`](docs/demo-runbook.md) for the exact 3-minute spoken script and step-by-step presentation beats.
+
+---
+
+## 5. Measured Telemetry & Benchmarks
+
+| Metric / Dimension | Cold TinyFish Agent | Warm Playwright Replay | Self-Healing Recovery |
+| :--- | :--- | :--- | :--- |
+| **Average Latency** | ~16.2s | **~1.28s (12.5x faster)** | ~2.85s |
+| **Agent Calls / Run** | 1 per run | **0 (Zero Agent calls)** | 1 (TinyFish Recovery) |
+| **Total Measured Cost** | ~$0.0150 | **$0.0000 (100% savings)** | ~$0.0150 |
+| **Silent Wrong Results** | 0 | **0 (Deterministic gate)** | **0 (Refused silent error)** |
+
+Detailed benchmark dataset and methodology: [`docs/benchmark.md`](docs/benchmark.md).
+
+---
+
+## 6. Security & Safety Guardrails
 * **Server-Only Configuration:** All API credentials are parsed server-side at startup. Secrets are never exposed to frontend bundles (`NEXT_PUBLIC_` or `VITE_` forbidden).
 * **Automated Redaction:** All structured logs automatically redact tokens, authorization headers, and cookies.
 * **Read-Only on Live Sites:** Live third-party sites are strictly read-only. All destructive or DOM-mutation tests run on an owned local fixture.

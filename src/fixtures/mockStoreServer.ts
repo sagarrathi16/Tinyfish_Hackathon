@@ -208,6 +208,10 @@ export class MockStoreServer {
     });
   }
 
+  getApp(): express.Express {
+    return this.app;
+  }
+
   async stop(): Promise<void> {
     return new Promise((resolve, reject) => {
       if (this.server) {
