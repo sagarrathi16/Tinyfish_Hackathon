@@ -432,7 +432,7 @@ export function createServer(repoOverride?: Repository) {
 }
 
 // Start server if executed directly
-if (process.argv[1] && process.argv[1].endsWith("server.ts")) {
+if (process.argv[1] && (process.argv[1].endsWith("server.ts") || process.argv[1].endsWith("server.js"))) {
   try {
     const env = getEnv();
     const app = createServer();
