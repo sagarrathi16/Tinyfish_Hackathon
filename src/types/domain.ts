@@ -242,6 +242,7 @@ export const StepPostconditionResultSchema = z.object({
   passed: z.boolean(),
   message: z.string(),
 });
+export type StepPostconditionResult = z.infer<typeof StepPostconditionResultSchema>;
 
 export const ValidationResultSchema = z.object({
   validationId: z.string().uuid(),
