@@ -287,3 +287,4 @@ export const BenchmarkRecordSchema = z.object({
   executedAt: z.string().datetime(),
 });
 export type BenchmarkRecord = z.infer<typeof BenchmarkRecordSchema>;
+

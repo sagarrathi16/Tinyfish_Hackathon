@@ -55,7 +55,7 @@ export function closeDatabase(): void {
 /**
  * Creates database tables and indexes if they do not exist.
  */
-function initSchema(db: Database): void {
+export function initSchema(db: Database): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS skills (
       id TEXT PRIMARY KEY,
@@ -149,3 +149,4 @@ function initSchema(db: Database): void {
     CREATE INDEX IF NOT EXISTS idx_benchmarks_site ON benchmark_records (site);
   `);
 }
+

@@ -233,3 +233,4 @@ The `run_events` table uses an auto-incrementing integer primary key (`sequence_
 
 ### 4.4 Disposable Demo Dataset Reset
 The `resetDemoStorage()` method purges all rows from `jobs`, `runs`, `run_events`, `validation_records`, `benchmark_records`, `skills`, and `site_adapters`. It guarantees a clean reset before every stage presentation while **never modifying source files, `.env`, or configuration files**.
+
