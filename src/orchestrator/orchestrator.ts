@@ -8,6 +8,7 @@ import { ValidatorWorker } from "../validator/validatorWorker.js";
 import { RecoveryAgent } from "../agents/recovery.js";
 import { OrchestratorStateMachine, type OrchestratorState } from "./stateMachine.js";
 import { ConcurrencyLimiter, JobBudgetTracker } from "./concurrencyBudget.js";
+import { DagScheduler } from "./dagScheduler.js";
 import {
   type AgentTask,
   type AgentResult,
@@ -704,5 +705,102 @@ export class ShadowTwinOrchestrator {
     if (errorMsg.includes("price") || errorMsg.includes("numericPrice")) return "PRODUCT_PRICE";
     if (errorMsg.includes("title")) return "PRODUCT_TITLE";
     return "SEARCH_INPUT";
+  }
+
+  /**
+   * Multi-Store Bounded Parallel Exploration & Compilation:
+   * Explores Store A and Store B in parallel when their input tasks are independent.
+   * Concurrency is strictly bounded by DagScheduler (default concurrency = 2).
+   * Compiler waits for required exploration results (dependency barrier).
+   */
+  async teachMultiStoreParallel(
+    stores: Array<TeachParams>,
+    concurrency: number = 2
+  ): Promise<Map<string, TeachOutcome>> {
+    const scheduler = new DagScheduler({
+      concurrency,
+      repo: this.repo,
+    });
+
+    const storeOutcomes = new Map<string, TeachOutcome>();
+
+    // For each independent store, add Explore Task and Compiler/Validation Task
+    for (const store of stores) {
+      const jobId = store.jobId || randomUUID();
+      const exploreTaskId = randomUUID();
+      const compileTaskId = randomUUID();
+
+      const exploreTask: AgentTask = {
+        taskId: exploreTaskId,
+        jobId,
+        role: "EXPLORER",
+        goal: `Explore ${store.domain} for ${store.sampleQuery}`,
+        site: store.domain,
+        inputPayload: { query: store.sampleQuery, entryUrl: store.entryUrl },
+        deadline: new Date(Date.now() + 120000).toISOString(),
+        correlationId: jobId,
+        maxSteps: 20,
+        retryCount: 0,
+        retryLimit: 1,
+      };
+
+      // 1. Independent Explorer Task (dependencies = [])
+      scheduler.addTask(exploreTask, [], async (t) => {
+        return this.explorer.explore(t);
+      });
+
+      const compileTask: AgentTask = {
+        taskId: compileTaskId,
+        jobId,
+        role: "COMPILER",
+        goal: `Compile skill for ${store.domain}`,
+        site: store.domain,
+        inputPayload: { domain: store.domain },
+        deadline: new Date(Date.now() + 120000).toISOString(),
+        correlationId: jobId,
+        maxSteps: 5,
+        retryCount: 0,
+        retryLimit: 1,
+      };
+
+      // 2. Dependent Compiler & Validation Barrier (dependencies = [exploreTaskId])
+      scheduler.addTask(compileTask, [exploreTaskId], async (t, depResults) => {
+        const exploreResult = depResults.get(exploreTaskId)!;
+        if (exploreResult.status !== "SUCCESS") {
+          return {
+            taskId: t.taskId,
+            jobId: t.jobId,
+            status: "FAILED",
+            structuredOutput: null,
+            evidenceReferences: [],
+            providerRunIds: {},
+            stepsUsage: null,
+            durationMs: 0,
+            errors: [{ code: "DEPENDENCY_FAILED", message: "Exploration failed" }],
+            warnings: [],
+          };
+        }
+
+        // Run full teach pipeline from compiled artifact
+        const teachOutcome = await this.teach(store);
+        storeOutcomes.set(store.domain, teachOutcome);
+
+        return {
+          taskId: t.taskId,
+          jobId: t.jobId,
+          status: teachOutcome.status === "SUCCESS" ? "SUCCESS" : "FAILED",
+          structuredOutput: (teachOutcome.adapter as unknown as Record<string, unknown>) || null,
+          evidenceReferences: [],
+          providerRunIds: {},
+          stepsUsage: null,
+          durationMs: 0,
+          errors: teachOutcome.reason ? [{ code: "TEACH_FAILED", message: teachOutcome.reason }] : [],
+          warnings: [],
+        };
+      });
+    }
+
+    await scheduler.run();
+    return storeOutcomes;
   }
 }

@@ -24,12 +24,14 @@ export const AgentTaskSchema = z.object({
   inputPayload: z.record(z.unknown()).default({}),
   deadline: z.string().datetime(),
   maxSteps: z.number().int().positive().default(20),
+  retryCount: z.number().int().nonnegative().optional(),
+  retryLimit: z.number().int().nonnegative().optional(),
   budget: z
     .object({
       maxSeconds: z.number().positive().default(120),
       maxUsd: z.number().nonnegative().default(1.0),
     })
-    .default({ maxSeconds: 120, maxUsd: 1.0 }),
+    .optional(),
   correlationId: z.string().min(1),
 });
 export type AgentTask = z.infer<typeof AgentTaskSchema>;

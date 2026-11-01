@@ -319,6 +319,29 @@ export class Repository {
     };
   }
 
+  saveRun(task: AgentTask, result: AgentResult): void {
+    this.saveTask(task);
+    this.saveResult(result);
+  }
+
+  getRunsByJob(jobId: string): Array<{ taskId: string; status: string; task: AgentTask; result: AgentResult | null }> {
+    const stmt = this.db.prepare(`
+      SELECT task_id, status, task_json, result_json FROM runs WHERE job_id = ?
+    `);
+    const rows = stmt.all(jobId) as Array<{
+      task_id: string;
+      status: string;
+      task_json: string;
+      result_json: string | null;
+    }>;
+    return rows.map((r) => ({
+      taskId: r.task_id,
+      status: r.status,
+      task: AgentTaskSchema.parse(JSON.parse(r.task_json)),
+      result: r.result_json ? AgentResultSchema.parse(JSON.parse(r.result_json)) : null,
+    }));
+  }
+
   // ==========================================================================
   // Validation Records
   // ==========================================================================

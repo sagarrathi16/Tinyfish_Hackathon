@@ -392,5 +392,150 @@ Because a hosted TinyFish Agent cannot attach to a local Playwright browser proc
 5. **Rollback Safety:** If any query fails, active version vN is retained and the job transitions to `NEEDS_REVIEW`. If needed, `repo.rollbackSiteAdapter(domain, previousVersion)` atomically restores previous versions without data loss.
 6. **Subsequent Replay Proof:** Once promoted, subsequent executions for any query on that domain run on local Playwright with strictly **zero TinyFish Agent calls**.
 
+---
+
+## 7. Multi-Agent Deterministic Orchestration & DAG Scheduling
+
+ShadowTwin rejects unstructured group chats and prompt-swarms in favor of a deterministic Directed Acyclic Graph (DAG) scheduler coupled with a strictly validated 12-state Finite State Machine.
+
+```mermaid
+flowchart TD
+    subgraph SITES["Parallel Site Explorations (Concurrency Cap = 2)"]
+        EXP_A["Task: EXPLORER (Store A: robu.in)"]
+        EXP_B["Task: EXPLORER (Store B: electronicscomp.com)"]
+    end
+
+    subgraph BARRIER_1["Dependency Barrier 1: Compiler Gate"]
+        COMP_A["Task: COMPILER (Store A Trace)"]
+        COMP_B["Task: COMPILER (Store B Trace)"]
+    end
+
+    subgraph BARRIER_2["Dependency Barrier 2: Validation Gate"]
+        VAL_A["Task: VALIDATOR (Candidate A)"]
+        VAL_B["Task: VALIDATOR (Candidate B)"]
+    end
+
+    subgraph PROMOTION["Sole Promotion Authority: Orchestrator"]
+        PROM_A["Atomic Promotion: SiteAdapter A -> ACTIVE"]
+        PROM_B["Atomic Promotion: SiteAdapter B -> ACTIVE"]
+    end
+
+    subgraph REPLAY["Deterministic Execution Worker (Local Playwright)"]
+        EXEC_A["Task: EXECUTOR (Store A Replay - 0 Tokens)"]
+        EXEC_B["Task: EXECUTOR (Store B Replay - 0 Tokens)"]
+    end
+
+    EXP_A -->|Trace A| COMP_A
+    EXP_B -->|Trace B| COMP_B
+    COMP_A -->|Candidate A| VAL_A
+    COMP_B -->|Candidate B| VAL_B
+    VAL_A -->|PASS| PROM_A
+    VAL_B -->|PASS| PROM_B
+    PROM_A --> EXEC_A
+    PROM_B --> EXEC_B
+```
+
+### 7.1 Seven Logical Agent Roles
+
+Each logical role has isolated code, strict I/O boundaries, and explicit permissions:
+
+| Logical Role | Execution Engine | Primary Responsibility | Permissions & Bounds |
+| :--- | :--- | :--- | :--- |
+| **Orchestrator** | Deterministic TypeScript | State transitions, DAG scheduling, budget tracking, and version promotion. | **Sole promotion authority.** Cannot browse or invent facts. |
+| **Explorer Agent** | TinyFish Automation API | Live web exploration, multi-step navigation, DOM trace and candidate binding extraction. | Cannot approve its own work. Never promotes adapters. |
+| **Compiler Agent** | LLM Synthesis (`gpt-4o-mini`) | Compiles exploration traces into platform-neutral task templates and per-domain site adapters. | Cannot browse or invent facts. Only generates `CANDIDATE` versions. |
+| **Executor Worker** | Local Playwright (Headless Chromium) | High-speed, deterministic replay of approved active bindings. | **Zero LLM tokens / zero TinyFish API calls.** Read-only live web. |
+| **Validator Worker** | Deterministic TypeScript Assertions | 7-stage verification: Schema, Identity, Price, Source, Freshness, Postconditions, and Anti-Injection. | Deterministic authority for `PASS`/`FAIL`. Critique models cannot override assertions. |
+| **Recovery Agent** | TinyFish Automation API | Autonomous diagnostic investigation of broken selectors using reconstructible GET URLs. | Proposes candidate patches (`CANDIDATE` only). Never modifies active records directly. |
+| **Benchmark Worker** | Deterministic TypeScript | Cold vs. warm latency, token/cost computation, cross-site transfer, and recovery trials. | Read-only metrics computation. |
+
+### 7.2 Finite State Machine (12 Strict States)
+
+The orchestrator enforces a strictly typed state machine. Any illegal transition throws an immediate `IllegalStateTransitionError` and halts closed:
+
+```mermaid
+stateDiagram-v2
+    [*] --> READY
+    READY --> TEACHING: Start exploration
+    READY --> EXECUTING: Run active skill
+    READY --> BLOCKED: Prohibited / rate-limited
+    READY --> FAILED: System failure
+
+    TEACHING --> COMPILING: Exploration complete
+    TEACHING --> FAILED: Exploration error
+    TEACHING --> BLOCKED: CAPTCHA / bot block
+
+    COMPILING --> VALIDATING_CANDIDATE: Skill compiled
+    COMPILING --> NEEDS_REVIEW: Ambiguous trace
+    COMPILING --> FAILED: Compilation crash
+
+    VALIDATING_CANDIDATE --> ACTIVE: Both queries PASS
+    VALIDATING_CANDIDATE --> NEEDS_REVIEW: Assertions failed
+    VALIDATING_CANDIDATE --> FAILED: Validation crash
+
+    ACTIVE --> EXECUTING: Start Playwright replay
+    ACTIVE --> READY: Reset / re-queue
+
+    EXECUTING --> DONE: Replay verified PASS
+    EXECUTING --> STUCK: BINDING_FAILED detected
+    EXECUTING --> NEEDS_REVIEW: MISMATCH / Ambiguity
+    EXECUTING --> BLOCKED: Bot wall / CAPTCHA
+    EXECUTING --> FAILED: Execution crash
+
+    STUCK --> RECOVERING: Eligible failure
+    STUCK --> NEEDS_REVIEW: Ineligible failure
+    STUCK --> FAILED: Budget exhausted
+
+    RECOVERING --> VALIDATING_CANDIDATE: Patch generated
+    RECOVERING --> NEEDS_REVIEW: Recovery failed
+    RECOVERING --> FAILED: Recovery crash
+
+    DONE --> [*]
+    NEEDS_REVIEW --> [*]
+    BLOCKED --> [*]
+    FAILED --> READY: Reset for retry
+```
+
+### 7.3 Typed Task Envelope (`AgentTaskSchema`)
+
+Every task dispatched across the multi-agent orchestration boundary is wrapped in a strongly typed schema with mandatory tracking, correlation, and budget limits:
+
+```typescript
+export const AgentTaskSchema = z.object({
+  jobId: z.string().uuid(),
+  taskId: z.string().uuid(),
+  role: AgentRoleSchema, // ORCHESTRATOR | EXPLORER | COMPILER | EXECUTOR | VALIDATOR | RECOVERY | BENCHMARK
+  correlationId: z.string(),
+  targetDomain: z.string().optional(),
+  deadline: z.string().datetime().optional(),
+  maxProviderSteps: z.number().int().positive().optional(),
+  retryCount: z.number().int().min(0).default(0),
+  retryLimit: z.number().int().min(0).default(2),
+  budget: z.object({
+    maxSeconds: z.number().positive().default(120),
+    maxUsd: z.number().nonnegative().default(1.0),
+  }).default({ maxSeconds: 120, maxUsd: 1.0 }),
+  parameters: z.record(z.any()),
+});
+```
+
+### 7.4 DAG Scheduler Guarantees
+
+The `DagScheduler` manages parallel execution with the following guarantees:
+
+1. **Deadlock & Cycle Prevention:**
+   Before running any task graph, a three-color depth-first search (`detectDeadlocks()`) checks for cyclic dependencies and missing tasks. Any cycle immediately halts with `DependencyDeadlockError`.
+2. **Bounded Concurrency (`concurrency = 2`):**
+   Independent exploration and replay jobs (e.g. Store A and Store B) run concurrently, but parallel worker threads are strictly capped at 2 via `ConcurrencyLimiter` to eliminate host browser memory contention and provider rate-limiting.
+3. **Hard Dependency Barriers:**
+   A compiler task will never launch if its upstream explorer task fails or is skipped. When an upstream dependency fails, downstream tasks are automatically marked `SKIPPED`.
+4. **Idempotent Duplicate Message Handling:**
+   Every executed task is registered in `processedMessages` indexed by `correlationId:taskId:retryCount`. Duplicate message deliveries immediately return the cached result without redundant execution.
+5. **Bounded Retries with Falloff:**
+   Failed tasks automatically retry up to `retryLimit` (default 2). Once exhausted, the node transitions to `FAILED` and halts downstream tasks without infinite loops.
+6. **Interrupted Job Resumption:**
+   When an orchestrator restarts or crashes mid-pipeline, `resumeFromRepository(jobId)` loads historical runs from SQLite and marks previously completed tasks as `COMPLETED`. Execution resumes seamlessly from the exact point of interruption.
+
+
 
 
