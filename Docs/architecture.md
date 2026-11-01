@@ -536,6 +536,92 @@ The `DagScheduler` manages parallel execution with the following guarantees:
 6. **Interrupted Job Resumption:**
    When an orchestrator restarts or crashes mid-pipeline, `resumeFromRepository(jobId)` loads historical runs from SQLite and marks previously completed tasks as `COMPLETED`. Execution resumes seamlessly from the exact point of interruption.
 
+---
+
+## 8. Cross-Site Transfer & Task Invariant Pattern (TIP) Matching
+
+ShadowTwin separates platform-neutral workflow logic from domain-specific site adapters. This enables cross-site transfer across structurally different storefronts without copying brittle selectors or re-teaching from scratch.
+
+```mermaid
+flowchart TD
+    subgraph STORE_A["Store A (Source: robu.in)"]
+        SKILL_A["Learned Skill (ACTIVE)"]
+        ADAPT_A["SiteAdapter A (Domain A Locators)"]
+    end
+
+    subgraph TRANSFER["Cross-Site Transfer Engine"]
+        REUSE["Transfer 100%:<br/>- 5-Step Task Template<br/>- Output Schema Contract<br/>- Selection Policy & Accessory Filter<br/>- Deterministic Postconditions"]
+        NEVER["Strict Invariant Guard:<br/>NEVER Copy Store A Selectors Into Store B"]
+    end
+
+    subgraph STORE_B["Store B (Target: electronicscomp.com)"]
+        TIP["Optional TIP Matcher<br/>(Structural Sketch / Scored Features)"]
+        EXP_B["Explorer Agent Fallback<br/>(TinyFish Discovery)"]
+        CAND_B["SiteAdapter B (Status: CANDIDATE)"]
+        VAL_GATE["2-Query Independent Validation Gate<br/>(Query 1: PASS & Query 2: PASS)"]
+        PROM_B["Atomic Promotion -> ACTIVE"]
+        REPLAY_B["Subsequent Replay<br/>(0 TinyFish API Calls)"]
+    end
+
+    SKILL_A --> REUSE
+    REUSE --> CAND_B
+    ADAPT_A -.->|Forbidden| NEVER
+    TIP -->|Confidence >= 0.70| CAND_B
+    TIP -.->|Ambiguity / Low Conf| EXP_B
+    EXP_B --> CAND_B
+    CAND_B --> VAL_GATE
+    VAL_GATE --> PROM_B
+    PROM_B --> REPLAY_B
+```
+
+### 8.1 Transferred vs. Relearned Artifacts
+
+The system strictly distinguishes category-invariant procedures from site-specific bindings:
+
+| Artifact | Classification | Transfer Mechanism | Rationale |
+| :--- | :--- | :--- | :--- |
+| **5-Step Procedure** (`OPEN`, `SEARCH`, `PARSE`, `SELECT`, `CONFIRM`) | **Transferred (100%)** | Reused 1:1 | E-commerce product discovery procedure is category-invariant across all online stores. |
+| **Output Contract** (`title`, `price`, `currency`, `url`, `retrievedAt`) | **Transferred (100%)** | Reused 1:1 | Standardized schema shared by down-stream consumers. |
+| **Product Selection Policy** | **Transferred (100%)** | Reused 1:1 | Accessory exclusion filters (`case`, `strap`, `cable`, `cover`) remain invariant across storefronts. |
+| **Deterministic Postconditions** | **Transferred (100%)** | Reused 1:1 | Universal assertions for schema validity, numeric price, identity, source authorization, and anti-injection. |
+| **Site Adapter Bindings** | **Relearned (Per Domain)** | TIP Matcher / Explorer Agent | **Never copied.** Domain A classes or selectors cannot be assumed to exist on Domain B. |
+| **Search URL Structure** | **Relearned (Per Domain)** | Discovered dynamically | URL query parameters differ (e.g. `?s=` vs `?keyword=`). |
+
+### 8.2 Optional TIP (Task Invariant Pattern) Matcher
+
+The TIP module operates as a feature-flagged heuristic matcher. It stores a compact structural sketch of web task invariants and scores candidates transparently:
+
+1. **Compact Structural Sketch:**
+   - **Search Box:** Expected accessibility roles (`searchbox`, `combobox`), input types (`search`, `text`), search keywords (`search`, `find`, `query`, `keyword`), and container contexts (`form`, `header`, `nav`).
+   - **Product Cards:** Repeated sibling element uniformity (minimum card count $\ge 2$), semantic tag hints (`article`, `section`, `div`), and exclusion rules for non-product elements.
+   - **Card Elements:** Grounded title links (`<a href="...">` or headings `h1`–`h4`) and grounded currency price snippets.
+2. **Transparent Scored Features:**
+   Every structural observation emits explicit, weighted features:
+   - `SEARCH_ROLE_AND_TYPE` (Weight 0.20)
+   - `SEARCH_NAME_OR_PLACEHOLDER` (Weight 0.15)
+   - `REPEATED_CARD_REGULARITY` (Weight 0.25)
+   - `TITLE_ANCHOR_GROUNDING` (Weight 0.15)
+   - `PRICE_PATTERN_GROUNDING` (Weight 0.15)
+   - `SEMANTIC_JSONLD_ALIGNMENT` (Weight 0.10)
+3. **Ambiguity & False-Positive Defense:**
+   - **Ambiguous Search Controls:** If two competing inputs have identical or near-identical scores (score difference $< 0.15$), the matcher refuses an arbitrary choice and marks `AMBIGUOUS_REJECTED`.
+   - **Misleading Similar DOMs:** Search suggestion pills and recent history lists are explicitly excluded using exclusion lists, grounding only genuine product catalog cards.
+   - **Ad / Sponsored Banners:** Elements bearing `ad`, `sponsored`, or `badge-sponsored` classes are filtered out from product card clusters.
+   - **Nested Grids & Carousels:** Traverses nested wrapper hierarchies (`carousel-outer -> nested-subgrid`) to discover repeated card clusters.
+   - **Missing ARIA Labels:** Gracefully falls back to visible placeholder, name, and tag attributes when accessibility attributes are absent.
+   - **Semantic JSON-LD Grounding & Mismatch Defense:** Compares structured Schema.org `<script type="application/ld+json">` prices with visible DOM prices. If JSON-LD is stale or disagrees ($|\Delta| > 1.0$), it discards the JSON-LD in favor of visible DOM text (`source: "MISMATCH_FALLBACK"`).
+   - **Universal Transfer Disclaimer:** If structural confidence is below $0.70$ or non-e-commerce content is detected, TIP halts with `LOW_CONFIDENCE_FALLBACK`. ShadowTwin never claims universal transfer across arbitrary websites.
+
+### 8.3 Two-Query Validation Gate & Replay Proof
+
+No candidate adapter synthesized by TIP or Explorer Agent is ever marked `ACTIVE` upon generation:
+1. Candidate adapter is stored in SQLite with `status: "CANDIDATE"`.
+2. The candidate adapter is replayed locally on **two distinct unseen queries** (e.g. `"Arduino Uno"` and `"ESP32"`).
+3. Both executions must be deterministically evaluated as `PASS` by the Validator Worker.
+4. Only upon dual PASS does the Orchestrator atomically promote the Store B adapter to `ACTIVE`.
+5. A subsequent query (e.g. `"Raspberry Pi"`) executes deterministically on local Playwright with **strictly zero TinyFish Agent calls**.
+
+
 
 
 

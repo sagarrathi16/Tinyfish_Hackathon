@@ -10,6 +10,11 @@ import { OrchestratorStateMachine, type OrchestratorState } from "./stateMachine
 import { ConcurrencyLimiter, JobBudgetTracker } from "./concurrencyBudget.js";
 import { DagScheduler } from "./dagScheduler.js";
 import {
+  CrossSiteTransferEngine,
+  type TransferWorkflowParams,
+} from "../transfer/crossSiteTransfer.js";
+import { type CrossSiteTransferReport } from "../types/transfer.js";
+import {
   type AgentTask,
   type AgentResult,
   type SiteAdapter,
@@ -75,6 +80,7 @@ export class ShadowTwinOrchestrator {
   private validator: ValidatorWorker;
   private recovery: RecoveryAgent;
   private concurrencyLimiter: ConcurrencyLimiter;
+  private transferEngine: CrossSiteTransferEngine;
 
   constructor(
     repo: Repository,
@@ -83,7 +89,8 @@ export class ShadowTwinOrchestrator {
     runner?: PlaywrightRunner,
     validator?: ValidatorWorker,
     recovery?: RecoveryAgent,
-    concurrencyLimiter?: ConcurrencyLimiter
+    concurrencyLimiter?: ConcurrencyLimiter,
+    transferEngine?: CrossSiteTransferEngine
   ) {
     this.repo = repo;
     this.explorer = explorer ?? new ExplorerAgent(undefined, repo);
@@ -92,6 +99,7 @@ export class ShadowTwinOrchestrator {
     this.validator = validator ?? new ValidatorWorker(repo);
     this.recovery = recovery ?? new RecoveryAgent(undefined, repo);
     this.concurrencyLimiter = concurrencyLimiter ?? new ConcurrencyLimiter();
+    this.transferEngine = transferEngine ?? new CrossSiteTransferEngine(repo, this.runner, this.validator);
   }
 
   /**
@@ -802,5 +810,16 @@ export class ShadowTwinOrchestrator {
 
     await scheduler.run();
     return storeOutcomes;
+  }
+
+  /**
+   * Cross-Site Transfer from Store A to Store B:
+   * Reuses task template, selection logic, output schema, and postconditions.
+   * Discovers/grounds separate Store B adapter (never copies Store A selectors).
+   * Validates on 2 distinct queries before promotion.
+   * Replays subsequent query with 0 TinyFish calls.
+   */
+  async transferWorkflow(params: TransferWorkflowParams): Promise<CrossSiteTransferReport> {
+    return this.transferEngine.transferWorkflow(params);
   }
 }

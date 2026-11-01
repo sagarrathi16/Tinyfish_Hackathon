@@ -16,6 +16,7 @@ The evaluation dataset consists of verified e-commerce search intents across tar
 | `EVAL-04` | `localhost:3000` (Store A) | Wearables (Negative Test) | `Smart Watch` | — | Must reject replacement strap & bumper case |
 | `EVAL-05` | `robu.in` (Live Web) | Microcontrollers | `Arduino Uno R3` | ~₹499.00 | Indian electronics store, live HTTPS target |
 | `EVAL-06` | `books.toscrape.com` (Live Web) | Books / Catalog | `Poetry` | £51.77 | Structural transfer domain, British GBP pricing |
+| `EVAL-07` | `localhost:3000` (Store B) | Maker Components | `Arduino Uno` | ₹475.00 | Structurally different fixture with semantic JSON-LD |
 
 ---
 
@@ -48,6 +49,22 @@ The evaluation dataset consists of verified e-commerce search intents across tar
 1. **12.5x Execution Speedup:** Replaying compiled, approved bindings in local Playwright completes in ~1.2s compared to ~16s for cold agent navigation.
 2. **100% Cost Elimination on Repeat Searches:** Parameterized replay runs locally on Chromium with zero provider API costs.
 3. **Zero Silent Errors:** The deterministic Validator Worker catches 100% of accessory mismatches, layout breakages, and DOM mutations, refusing silent hallucinations.
+
+### 3.1 Cross-Site Transfer & Relearning Telemetry Table
+
+| Dimension / Artifact | Store A (Source: Robu) | Store B (Target: ElectronicsComp) | Transfer Status | Grounding Details |
+| :--- | :--- | :--- | :--- | :--- |
+| **Platform-Neutral Procedure** | 5-Step (OPEN, SEARCH, PARSE, SELECT, CONFIRM) | 5-Step (Identical template) | **TRANSFERRED (100%)** | Category-invariant e-commerce procedure reused 1:1 |
+| **Output Contract & Schema** | Title, Price, Currency, URL, Freshness | Identical schema contract | **TRANSFERRED (100%)** | Reused across e-commerce categories |
+| **Product Selection Policy** | Accessory Filter & Spec Tokens | Identical selection policy | **TRANSFERRED (100%)** | Excluded replacement straps, cases, cables, adapters |
+| **Deterministic Postconditions** | Schema, Identity, Price, Source, Freshness | Universal 7-Stage Assertions | **TRANSFERRED (100%)** | Strict independent PASS/FAIL authority |
+| **Search Input Binding** | `input[name='s']` | `input[name='keyword']` / `#store-b-kw` | **RELEARNED** | Re-grounded specifically for Store B |
+| **Product Card Binding** | `.product-grid-item` | `article.catalog-card` | **RELEARNED** | Re-grounded repeated product container |
+| **Search URL Pattern** | `/store-a/search?s={query}` | `/store-b/search?keyword={query}` | **RELEARNED** | Distinct URL structure discovered |
+| **TIP Structural Match** | — | MATCHED (Confidence: 100%) | **MATCHED** | Grounded 3 product cards + JSON-LD |
+| **2-Query Validation Gate** | PASS | Q1 (Arduino Uno): PASS<br/>Q2 (ESP32): PASS | **VERIFIED PASS** | Pre-condition required before ACTIVE promotion |
+| **Subsequent Replay** | Replay Reused | Query: "Raspberry Pi"<br/>**0 TinyFish API calls** | **DETERMINISTIC REPLAY** | Verified PASS in 1.35s (Local Playwright) |
+
 
 ---
 

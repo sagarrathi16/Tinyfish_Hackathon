@@ -406,3 +406,4 @@ describe("Multi-Agent Deterministic Orchestration & DAG Scheduling", () => {
     expect(() => scheduler.detectDeadlocks()).toThrow(/non-existent prerequisite task/);
   });
 });
+
